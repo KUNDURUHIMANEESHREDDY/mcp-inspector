@@ -34,6 +34,8 @@ jobs:
         run: npm run check
       - name: Unit and integration tests
         run: npm test
+      - name: Dedicated compatibility report tests
+        run: npm run test:compat
       - name: Dependency audit
         run: npm audit --audit-level=high
       - name: Dependency-free framing benchmark

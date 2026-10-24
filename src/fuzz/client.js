@@ -43,71 +43,92 @@ export async function snapshotServer({ command, args, protocol = 'legacy', outpu
   }
 }
 
-export async function fuzzServer({ command, args, protocol = 'legacy', maxCases = 30, caseMode = 'valid', execute = false }) {
+export async function fuzzServer({
+  command, args, protocol = 'legacy', maxCases = 30, caseMode = 'valid', execute = false,
+  timeoutMs = 15_000, maxDurationMs = 300_000, signal, onProgress,
+}) {
   if (!['valid', 'invalid', 'mixed'].includes(caseMode)) throw new Error('caseMode must be valid, invalid, or mixed');
   if (!Number.isInteger(maxCases) || maxCases < 1 || maxCases > 500) throw new RangeError('maxCases must be an integer from 1 to 500');
   if (caseMode === 'mixed' && maxCases < 2) throw new RangeError('mixed case mode requires maxCases >= 2');
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 120_000) throw new RangeError('timeoutMs must be from 100 to 120000');
+  if (!Number.isInteger(maxDurationMs) || maxDurationMs < 1_000 || maxDurationMs > 900_000) throw new RangeError('maxDurationMs must be from 1000 to 900000');
+  const runStarted = performance.now();
   const { client } = await connectToServer(command, args, protocol);
   const report = {
-    schemaVersion: 1,
-    generatedAt: new Date().toISOString(),
+    schemaVersion: 1, generatedAt: new Date().toISOString(),
     protocolEra: client.getProtocolEra?.() ?? 'legacy-or-unknown',
     server: client.getServerVersion?.() ?? null,
-    dryRun: !execute,
-    caseMode,
-    totalCandidates: 0,
-    executed: 0,
-    tools: [],
+    dryRun: !execute, caseMode, timeoutMs, maxDurationMs,
+    cancelled: false, limitReached: false, totalCandidates: 0, executed: 0, tools: [],
   };
   try {
     const { tools } = await client.listTools();
-    const remaining = maxCases;
     for (const tool of tools) {
-      if (report.totalCandidates >= remaining) break;
+      if (signal?.aborted) { report.cancelled = true; break; }
+      if (performance.now() - runStarted >= maxDurationMs) { report.limitReached = true; break; }
+      if (report.totalCandidates >= maxCases) break;
       const generated = generateSchemaCases(tool.inputSchema ?? { type: 'object' }, {
-        maxCases: Math.min(remaining - report.totalCandidates, 30),
-        mode: caseMode,
+        maxCases: Math.min(maxCases - report.totalCandidates, 30), mode: caseMode,
       });
       const item = {
-        tool: tool.name,
-        candidate_count: generated.cases.length,
-        warnings: generated.warnings,
+        tool: tool.name, candidate_count: generated.cases.length, warnings: generated.warnings,
         cases: generated.cases.map((testCase) => ({ label: testCase.label, valid_by_schema: testCase.validBySchema === true })),
       };
       report.totalCandidates += generated.cases.length;
       if (execute) {
         item.results = [];
         for (const testCase of generated.cases) {
+          if (signal?.aborted) {
+            item.results.push({ label: testCase.label, outcome: 'cancelled' });
+            report.cancelled = true;
+            break;
+          }
+          const remainingMs = maxDurationMs - (performance.now() - runStarted);
+          if (remainingMs < 1_000) {
+            item.results.push({ label: testCase.label, outcome: 'skipped_limit' });
+            report.limitReached = true;
+            break;
+          }
           const started = performance.now();
+          let outcome;
           try {
-            const result = await client.callTool({ name: tool.name, arguments: testCase.arguments }, { timeout: 15_000 });
+            const result = await client.callTool(
+              { name: tool.name, arguments: testCase.arguments },
+              { timeout: Math.min(timeoutMs, Math.max(100, remainingMs)), signal },
+            );
+            outcome = result?.isError === true ? 'tool_error' : 'completed';
             item.results.push({
-              label: testCase.label,
-              duration_ms: Number((performance.now() - started).toFixed(3)),
-              tool_reported_error: result?.isError === true,
-              outcome: result?.isError === true ? 'tool_error' : 'completed',
+              label: testCase.label, duration_ms: Number((performance.now() - started).toFixed(3)),
+              tool_reported_error: result?.isError === true, outcome,
             });
           } catch (error) {
+            outcome = error?.name === 'AbortError' ? 'cancelled' : (error?.name === 'TimeoutError' ? 'timeout' : 'protocol_error');
             item.results.push({
-              label: testCase.label,
-              duration_ms: Number((performance.now() - started).toFixed(3)),
-              outcome: 'protocol_error',
-              error_type: error?.name ?? 'Error',
+              label: testCase.label, duration_ms: Number((performance.now() - started).toFixed(3)),
+              outcome, error_type: error?.name ?? 'Error',
             });
+            if (outcome === 'cancelled') report.cancelled = true;
           }
           report.executed += 1;
+          onProgress?.({ stage: 'case', completed: report.executed, candidates: report.totalCandidates, tool: tool.name, outcome });
+          if (report.cancelled || report.limitReached) break;
         }
       }
       report.tools.push(item);
+      onProgress?.({ stage: 'tool', completed: report.tools.length, candidates: report.totalCandidates, tool: tool.name });
+      if (report.cancelled || report.limitReached) break;
     }
   } finally {
     await client.close();
   }
+  report.durationMs = Number((performance.now() - runStarted).toFixed(2));
   return report;
 }
-
-export async function runWorkflow({ command, args, protocol = 'legacy', workflow, execute = false }) {
+export async function runWorkflow({ command, args, protocol = 'legacy', workflow, execute = false, timeoutMs = 30_000, maxDurationMs = 300_000, signal, onProgress }) {
   validateWorkflowInput(workflow);
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 120_000) throw new RangeError('timeoutMs must be from 100 to 120000');
+  if (!Number.isInteger(maxDurationMs) || maxDurationMs < 1_000 || maxDurationMs > 900_000) throw new RangeError('maxDurationMs must be from 1000 to 900000');
+  const runStarted = performance.now();
   const { client } = await connectToServer(command, args, protocol);
   const report = {
     schemaVersion: 1,
@@ -115,6 +136,10 @@ export async function runWorkflow({ command, args, protocol = 'legacy', workflow
     workflow: workflow.name || 'unnamed-workflow',
     protocolEra: client.getProtocolEra?.() ?? 'legacy-or-unknown',
     dryRun: !execute,
+    timeoutMs,
+    maxDurationMs,
+    cancelled: false,
+    limitReached: false,
     steps: [],
   };
   try {
@@ -130,7 +155,14 @@ export async function runWorkflow({ command, args, protocol = 'legacy', workflow
     });
 
     for (const [index, step] of steps.entries()) {
-      const id = typeof step?.id === 'string' && step.id ? step.id : `step-${index + 1}`;
+      const id = typeof step?.id === 'string' && step.id ? step.id : 'step-' + (index + 1);
+      if (signal?.aborted || performance.now() - runStarted >= maxDurationMs) {
+        report.cancelled = signal?.aborted === true;
+        report.limitReached = !report.cancelled;
+        report.steps.push({ id, tool: typeof step?.tool === 'string' ? step.tool : undefined, outcome: report.cancelled ? 'cancelled' : 'skipped_limit' });
+        onProgress?.({ stage: 'step', completed: report.steps.length, total: steps.length, outcome: report.steps[report.steps.length - 1].outcome });
+        break;
+      }
       if (!step || typeof step.tool !== 'string' || typeof step.arguments !== 'object' || step.arguments === null || Array.isArray(step.arguments)) {
         throw new Error(`Invalid workflow step at index ${index}`);
       }
@@ -159,24 +191,34 @@ export async function runWorkflow({ command, args, protocol = 'legacy', workflow
       if (execute && ajvMatch.valid) {
         const started = performance.now();
         try {
-          const result = await client.callTool({ name: step.tool, arguments: referenceResult.value }, { timeout: 30_000 });
-          row.duration_ms = Number((performance.now() - started).toFixed(3));
-          row.outcome = result?.isError === true ? 'tool_error' : 'completed';
-          // Only successful responses may be used as downstream workflow inputs.
-          if (result?.isError !== true) completedResults.set(id, result);
+          const remainingMs = maxDurationMs - (performance.now() - runStarted);
+          if (remainingMs < 1_000) {
+            row.outcome = 'skipped_limit';
+            report.limitReached = true;
+          } else {
+            const result = await client.callTool({ name: step.tool, arguments: referenceResult.value }, { timeout: Math.min(timeoutMs, Math.max(100, remainingMs)), signal });
+            row.duration_ms = Number((performance.now() - started).toFixed(3));
+            row.outcome = result?.isError === true ? 'tool_error' : 'completed';
+            // Only successful responses may be used as downstream workflow inputs.
+            if (result?.isError !== true) completedResults.set(id, result);
+          }
         } catch (error) {
           row.duration_ms = Number((performance.now() - started).toFixed(3));
-          row.outcome = 'protocol_error';
+          row.outcome = error?.name === 'AbortError' ? 'cancelled' : (error?.name === 'TimeoutError' ? 'timeout' : 'protocol_error');
           row.error_type = error?.name ?? 'Error';
+          if (row.outcome === 'cancelled') report.cancelled = true;
         }
       } else {
         row.outcome = execute ? 'skipped_invalid_arguments' : 'dry_run';
       }
       report.steps.push(row);
+      onProgress?.({ stage: 'step', completed: report.steps.length, total: steps.length, outcome: row.outcome });
+      if (report.cancelled || report.limitReached) break;
     }
   } finally {
     await client.close();
   }
+  report.durationMs = Number((performance.now() - runStarted).toFixed(2));
   return report;
 }
 

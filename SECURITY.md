@@ -18,3 +18,7 @@ Include affected versions, reproduction steps, expected impact, and a suggested 
 ## Supported versions
 
 Until a stable 1.x release exists, security fixes target the latest published `0.x` version on the default branch. Update dependencies and rerun the CI workflow before production use.
+
+## Threat model
+
+See [SECURITY_MODEL.md](./SECURITY_MODEL.md) for assets, trust boundaries, known residual risks, and the current verification plan.

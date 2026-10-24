@@ -20,6 +20,7 @@ test('CLI help and version work without initializing optional proxy integrations
   assert.equal(help.status, 0, help.stderr);
   assert.match(help.stdout, /Protocol-level observability/);
   assert.match(help.stdout, /mcp-inspector dashboard/);
+  assert.match(help.stdout, /mcp-inspector compat/);
   const version = runCli('version');
   assert.equal(version.status, 0, version.stderr);
   assert.match(version.stdout.trim(), /^0\.1\.0$/);
@@ -38,4 +39,7 @@ test('CLI rejects unknown proxy options and malformed safety flags clearly', () 
   const invalidMax = runCli('fuzz', '--max-cases', 'not-a-number', '--', process.execPath, 'server.js');
   assert.equal(invalidMax.status, 2);
   assert.match(invalidMax.stderr, /integer from 1 to 500/);
+  const invalidTransport = runCli('compat', '--transport', 'tcp');
+  assert.equal(invalidTransport.status, 2);
+  assert.match(invalidTransport.stderr, /--transport must be stdio, http, or both/);
 });
