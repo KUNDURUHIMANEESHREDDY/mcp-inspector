@@ -28,8 +28,8 @@ jobs:
         uses: actions/setup-node@v7.1.0
         with:
           node-version: ${{ matrix.node }}
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
       - name: Static checks
         run: npm run check
       - name: Unit and integration tests
@@ -79,8 +79,8 @@ jobs:
         uses: actions/setup-node@v7.1.0
         with:
           node-version: '22'
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
       - name: Static checks
         run: npm run check
       - name: Unit and integration tests
