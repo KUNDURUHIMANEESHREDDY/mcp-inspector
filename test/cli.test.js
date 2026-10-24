@@ -19,6 +19,7 @@ test('CLI help and version work without initializing optional proxy integrations
   const help = runCli('help');
   assert.equal(help.status, 0, help.stderr);
   assert.match(help.stdout, /Protocol-level observability/);
+  assert.match(help.stdout, /mcp-inspector dashboard/);
   const version = runCli('version');
   assert.equal(version.status, 0, version.stderr);
   assert.match(version.stdout.trim(), /^0\.1\.0$/);

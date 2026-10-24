@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { isDashboardActive, publishDashboardEvent } from '../dashboard/event-store.js';
 
 const LEVELS = Object.freeze({ debug: 10, info: 20, warn: 30, error: 40 });
 const configuredLevel = process.env.MCP_INSPECTOR_LOG_LEVEL ?? 'info';
@@ -31,10 +32,16 @@ function sanitizeValue(key, value, depth = 0) {
 }
 
 export function log(level, event, fields = {}) {
-  if (!(level in LEVELS) || LEVELS[level] < threshold) return;
+  if (!(level in LEVELS)) return;
   const safeFields = {};
   for (const [key, value] of Object.entries(fields)) safeFields[key] = sanitizeValue(key, value);
   const record = { time: new Date().toISOString(), level, event: safeString(event), ...safeFields };
+  // Capture sanitized metadata before console-level filtering so the local
+  // dashboard can display debug events without changing stderr verbosity.
+  if (isDashboardActive()) {
+    try { publishDashboardEvent(record); } catch { /* Observation must never break protocol forwarding. */ }
+  }
+  if (LEVELS[level] < threshold) return;
   // The protocol channel is stdout for stdio MCP servers. Diagnostics must never
   // contaminate it, so every log record is written to stderr only.
   try {
