@@ -87,3 +87,19 @@ jobs:
         run: npm test
       - name: Framing benchmark
         run: node ./bench/framer.js
+
+  required:
+    name: required
+    if: always()
+    needs: [test, windows-smoke]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all supported runtime and Windows checks to pass
+        env:
+          MATRIX_RESULT: ${{ needs.test.result }}
+          WINDOWS_RESULT: ${{ needs.windows-smoke.result }}
+        shell: bash
+        run: |
+          printf 'Node matrix: %s\\nWindows smoke: %s\\n' "$MATRIX_RESULT" "$WINDOWS_RESULT"
+          test "$MATRIX_RESULT" = success
+          test "$WINDOWS_RESULT" = success
