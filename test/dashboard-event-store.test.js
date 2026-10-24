@@ -24,6 +24,22 @@ test('dashboard event store exposes only allowlisted operational metadata', () =
   assert.equal(Object.hasOwn(items[0], 'authorization'), false);
 });
 
+test('dashboard event text redacts token query parameters and common API key formats', () => {
+  resetDashboardEventStore();
+  publishDashboardEvent({
+    event: 'rpc.failure',
+    level: 'warn',
+    reason: 'request failed?access_token=access-secret&refresh_token=refresh-secret',
+    error_type: 'keys sk-proj-1234567890abcdefghijklmnop ghp_abcdefghijklmnopqrstuvwxyz0123456789 AKIAIOSFODNN7EXAMPLE',
+  });
+  const [item] = getDashboardEvents({ limit: 10 });
+  assert.doesNotMatch(item.reason, /access-secret|refresh-secret/);
+  assert.match(item.reason, /access_token=\[REDACTED\]/);
+  assert.match(item.reason, /refresh_token=\[REDACTED\]/);
+  assert.doesNotMatch(item.error_type, /sk-proj-|ghp_|AKIAIOSFODNN7EXAMPLE/);
+  assert.equal((item.error_type.match(/\[REDACTED\]/g) || []).length, 3);
+});
+
 test('dashboard summary calculates counts and latency percentiles', () => {
   resetDashboardEventStore();
   publishDashboardEvent({ event: 'rpc.request', level: 'info', method: 'tools/call' });
