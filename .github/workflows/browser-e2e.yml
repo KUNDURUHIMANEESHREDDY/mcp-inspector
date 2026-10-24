@@ -26,8 +26,9 @@ jobs:
           node-version: '24'
       - name: Install locked project dependencies
         run: npm ci --no-audit --no-fund
-      - name: Install Playwright without changing project manifests
-        run: npm install --no-save --no-package-lock playwright
+      # Pin the browser driver so the installed Chromium revision is reproducible.
+      - name: Install pinned Playwright without changing project manifests
+        run: npm install --no-save --no-package-lock playwright@1.64.1
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
       - name: Static checks
