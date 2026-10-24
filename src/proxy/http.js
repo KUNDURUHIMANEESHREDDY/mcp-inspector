@@ -28,9 +28,16 @@ function isLoopback(host) {
 }
 
 function hostHeaderHostname(value) {
-  if (typeof value !== 'string' || value.length > 512 || /[\r\n\s/@]/.test(value)) return '';
+  // Host is an authority, not a URL. Reject path/query/fragment/escape syntax
+  // before URL parsing so values such as "127.0.0.1:9900?x" cannot be treated
+  // as a canonical loopback Host header.
+  if (typeof value !== 'string' || value.length > 512 ||
+      !/^[A-Za-z0-9.\[\]:-]+$/.test(value)) return '';
   try {
-    return normalizeHostname(new URL(`http://${value}`).hostname);
+    const parsed = new URL(`http://${value}`);
+    if (parsed.username || parsed.password || parsed.pathname !== '/' ||
+        parsed.search || parsed.hash) return '';
+    return normalizeHostname(parsed.hostname);
   } catch {
     return '';
   }
