@@ -37,6 +37,7 @@ test('dashboard serves its shell and read-only status API', async (t) => {
   const stylesheet = await request(port, { path: '/styles.css' });
   assert.equal(stylesheet.status, 200);
   assert.match(stylesheet.body, /color-scheme:light/);
+  assert.match(stylesheet.body, /--muted-2:#5b6575/, 'secondary labels use a readable light-theme contrast token');
   assert.match(page.body, /name="color-scheme" content="light"/);
   assert.match(page.body, /data-view="contracts"/);
   assert.match(page.body, /data-view="fuzz"/);
