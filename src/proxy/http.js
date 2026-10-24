@@ -155,7 +155,16 @@ function hostHeaderHostname(value) {
   try {
     const parsed = new URL(`http://${value}`);
     if (parsed.username || parsed.password || parsed.pathname !== '/' || parsed.search || parsed.hash) return '';
-    return normalizeHostname(parsed.hostname);
+    const hostname = normalizeHostname(parsed.hostname);
+    // WHATWG URL parsing normalizes legacy IPv4 forms such as 127.1 and
+    // 0x7f000001 to 127.0.0.1. Do not let a non-IP spelling become a
+    // loopback IP after parsing.
+    const closeBracket = value.startsWith('[') ? value.indexOf(']') : -1;
+    const rawHostname = closeBracket >= 0
+      ? value.slice(1, closeBracket)
+      : value.split(':')[0];
+    if (isIP(rawHostname) === 0 && isIP(hostname) !== 0) return '';
+    return hostname;
   } catch {
     return '';
   }
