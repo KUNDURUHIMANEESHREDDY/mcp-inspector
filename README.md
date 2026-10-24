@@ -121,7 +121,7 @@ node ./src/cli.js compat --transport http --url http://127.0.0.1:3000/mcp
 node ./src/cli.js compat --transport both --url http://127.0.0.1:3000/mcp -- node ./fixtures/sdk-mcp-server.js
 ```
 
-The JSON report contains one pass/fail result per transport/protocol combination, negotiated protocol era, elapsed time, tool count, and normalized contract hash. Exit code 1 means at least one probe failed. URL credentials are rejected. Results reflect only the target endpoint actually tested; this is not blanket certification of third-party servers.
+The JSON report contains one pass/fail result per transport/protocol combination, negotiated protocol era, elapsed time, tool count, and normalized contract hash. Exit code 1 means at least one probe failed. URL credentials are rejected. For protected HTTP endpoints, configure `MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN` or `MCP_INSPECTOR_UPSTREAM_HEADERS` for static credentials. `--oauth` invokes the MCP SDK's OAuth authorization-code/PKCE flow, prints the authorization URL to stderr, checks the loopback callback's Host and state, and holds tokens in memory only for the current process. OAuth requires HTTPS off loopback. Results reflect only the target endpoint actually tested; this is not blanket certification of third-party servers.
 
 ### 5. Replay a stateful workflow
 
