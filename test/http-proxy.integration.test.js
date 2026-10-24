@@ -129,6 +129,9 @@ test('HTTP proxy blocks cross-site browser Origins and spoofed Host headers befo
     `127.0.0.1:${proxyAddress.port}?unexpected`,
     `127.0.0.1:${proxyAddress.port}#fragment`,
     `127.0.0.1:${proxyAddress.port}%2fattacker`,
+    `127.1:${proxyAddress.port}`,
+    `0177.0.0.1:${proxyAddress.port}`,
+    `0x7f000001:${proxyAddress.port}`,
   ]) {
     const malformedHost = await send({ host });
     assert.equal(malformedHost.status, 403, `malformed Host must be rejected: ${host}`);
