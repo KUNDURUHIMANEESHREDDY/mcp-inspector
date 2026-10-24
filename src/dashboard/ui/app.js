@@ -172,10 +172,14 @@ function renderLatencyChart() {
   for (let i = 0; i <= 3; i += 1) {
     const y = pad.top + (plotHeight * i / 3);
     chart.append(svgElement('line', { x1: pad.left, y1: y, x2: width - pad.right, y2: y, class: 'chart-gridline' }));
-    chart.append(svgElement('text', { x: pad.left - 8, y: y + 3, 'text-anchor': 'end', class: 'chart-label' })).textContent = i === 0 ? 'MAX' : i === 3 ? '0' : '';
+    const tick = svgElement('text', { x: pad.left - 8, y: y + 3, 'text-anchor': 'end', class: 'chart-label' });
+    tick.textContent = i === 0 ? 'MAX' : i === 3 ? '0' : '';
+    chart.append(tick);
   }
   if (!responses.length) {
-    chart.append(svgElement('text', { x: width / 2, y: height / 2, 'text-anchor': 'middle', class: 'chart-label' })).textContent = 'Waiting for response timings';
+    const message = svgElement('text', { x: width / 2, y: height / 2, 'text-anchor': 'middle', class: 'chart-label' });
+    message.textContent = 'Waiting for response timings';
+    chart.append(message);
     return;
   }
   const values = responses.map((event) => Math.max(0, event.duration_ms));
@@ -198,12 +202,18 @@ function renderLatencyChart() {
   points.forEach((point, index) => {
     if (index === points.length - 1 || index % 5 === 0) {
       const dot = svgElement('circle', { cx: point.x, cy: point.y, r: index === points.length - 1 ? 4 : 2.5, class: 'chart-point' });
-      dot.append(svgElement('title', {})).textContent = formatDuration(point.value);
+      const title = svgElement('title', {});
+      title.textContent = formatDuration(point.value);
+      dot.append(title);
       chart.append(dot);
     }
   });
-  chart.append(svgElement('text', { x: pad.left, y: height - 7, class: 'chart-label' })).textContent = 'OLDER';
-  chart.append(svgElement('text', { x: width - pad.right, y: height - 7, 'text-anchor': 'end', class: 'chart-label' })).textContent = 'LATEST';
+  const olderLabel = svgElement('text', { x: pad.left, y: height - 7, class: 'chart-label' });
+  olderLabel.textContent = 'OLDER';
+  chart.append(olderLabel);
+  const latestLabel = svgElement('text', { x: width - pad.right, y: height - 7, 'text-anchor': 'end', class: 'chart-label' });
+  latestLabel.textContent = 'LATEST';
+  chart.append(latestLabel);
 }
 
 function createEventRow(event, expanded) {
