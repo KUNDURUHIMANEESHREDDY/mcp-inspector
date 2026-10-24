@@ -11,6 +11,7 @@ MCP Inspector is a local-first CLI with a built-in web dashboard. It sits betwee
 1. Install Node.js 22 or newer, Git, and npm.
 2. Extract this repository ZIP.
 3. Double-click `RUN_LOCAL_CHECKS.bat` first. It installs dependencies and runs static checks, tests, the dependency audit, and benchmarks. The window stays open on success or failure.
+4. Double-click `RUN_DASHBOARD.bat` to connect to a Streamable HTTP MCP server (default `http://127.0.0.1:3000`). Enter the actual upstream URL, then open `http://127.0.0.1:9911`; configure your MCP client to use the proxy at `http://127.0.0.1:9900` with the upstream's MCP path (commonly `/mcp`).
 4. After local verification succeeds, run `gh auth login` in PowerShell and double-click `PUSH_TO_GITHUB.bat` to create/push the repository.
 
 If an older extracted copy reports an OpenTelemetry `ERESOLVE` error, run `FIX_OTEL_DEPENDENCY.bat` once; it pins the API package to a version accepted by the selected SDK, then retries dependency installation. If a script stops for another reason, copy the error text from the terminal; a failed check intentionally prevents publishing.
@@ -39,7 +40,7 @@ npm run check
 npm test
 ```
 
-The OpenTelemetry SDK/exporter versions are pinned together at `0.223.0`; `@opentelemetry/api` is pinned to `1.9.1` because SDK `0.223.0` declares a peer range below `1.10.0`. Do not use `--force` or `--legacy-peer-deps` to bypass this compatibility check. The SDK-backed interoperability tests use the official MCP TypeScript SDK v2 and a small local fixture server. If dependency installation fails, those tests cannot execute; do not treat skipped tests as passing evidence. This source archive omits a generated `package-lock.json` because registry access was unavailable during assembly; the Windows publishing helper creates the lockfile during a successful install and commits it before pushing. For any other release path, generate and commit the lockfile before accepting the release.
+The OpenTelemetry SDK/exporter versions are pinned together at `0.223.0`; `@opentelemetry/api` is pinned to `1.9.1` because SDK `0.223.0` declares a peer range below `1.10.0`. Do not use `--force` or `--legacy-peer-deps` to bypass this compatibility check. The SDK-backed interoperability tests use the official MCP TypeScript SDK v2 and a small local fixture server. If dependency installation fails, those tests cannot execute; do not treat skipped tests as passing evidence. The repository includes `package-lock.json`. Keep it in sync whenever dependencies change; CI installs the declared dependency graph before running SDK-backed interoperability tests and dependency audits.
 
 ## Quick start
 
