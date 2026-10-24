@@ -95,7 +95,11 @@ function localSummary() {
 }
 
 function allSummary() {
-  return localSummary();
+  const local = localSummary();
+  const localLatest = state.events.length ? state.events[state.events.length - 1].id : 0;
+  const remoteLatest = Number(state.summary?.latestEventId || 0);
+  if (localLatest > remoteLatest) return local;
+  return Object.assign({}, local, state.summary);
 }
 
 function eventClass(event) {
@@ -358,7 +362,9 @@ function compareContracts() {
   before.forEach((tool, name) => {
     if (!after.has(name)) changes.push({ breaking: true, title: 'Tool removed: ' + name, message: 'The current snapshot no longer advertises this tool.' });
     else if (stable(tool.inputSchema || {}) !== stable(after.get(name).inputSchema || {})) changes.push({ breaking: true, title: 'Input schema changed: ' + name, message: 'The input schema differs; review required properties and constraints.' });
+    else if (stable(tool.outputSchema || {}) !== stable(after.get(name).outputSchema || {})) changes.push({ breaking: true, title: 'Output schema changed: ' + name, message: 'The structured output contract differs; review downstream consumers.' });
     else if (stable(tool.annotations || {}) !== stable(after.get(name).annotations || {})) changes.push({ breaking: true, title: 'Tool annotations changed: ' + name, message: 'The tool safety or behavior annotations changed and should be reviewed.' });
+    else if ((tool.description || '') !== (after.get(name).description || '')) changes.push({ breaking: false, title: 'Tool description changed: ' + name, message: 'Description text changed; review the instructions presented to agents.' });
   });
   after.forEach((tool, name) => {
     if (!before.has(name)) changes.push({ breaking: false, title: 'Tool added: ' + name, message: 'A new tool is available in the current snapshot.' });
