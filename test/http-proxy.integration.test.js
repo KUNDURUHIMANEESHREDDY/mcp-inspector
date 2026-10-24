@@ -125,6 +125,14 @@ test('HTTP proxy blocks cross-site browser Origins and spoofed Host headers befo
   assert.equal(originRejected.status, 403);
   const hostRejected = await send({ host: 'attacker.example' });
   assert.equal(hostRejected.status, 403);
+  for (const malformedHost of [
+    `127.0.0.1:${proxyAddress.port}?attacker.example`,
+    `127.0.0.1:${proxyAddress.port}#fragment`,
+    `127.0.0.1:${proxyAddress.port}%00`,
+    `127.0.0.1:\\${proxyAddress.port}`,
+  ]) {
+    assert.equal((await send({ host: malformedHost })).status, 403, `reject malformed Host: ${malformedHost}`);
+  }
   assert.equal(upstreamCalls, 0, 'rejected browser requests must never reach upstream');
 
   const localBrowser = await send({ origin: 'http://localhost:3000' });
