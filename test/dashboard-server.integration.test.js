@@ -34,6 +34,13 @@ test('dashboard serves its shell and read-only status API', async (t) => {
   assert.match(page.headers['content-security-policy'], /default-src 'self'/);
   assert.match(page.body, /MCP Inspector/);
 
+  const stylesheet = await request(port, { path: '/styles.css' });
+  assert.equal(stylesheet.status, 200);
+  assert.match(stylesheet.body, /color-scheme:light/);
+  assert.match(page.body, /name="color-scheme" content="light"/);
+  assert.match(page.body, /data-view="contracts"/);
+  assert.match(page.body, /data-view="fuzz"/);
+
   const status = await request(port, { path: '/api/status' });
   assert.equal(status.status, 200);
   const data = JSON.parse(status.body);
