@@ -232,3 +232,85 @@ test('HTTP proxy keeps established SSE responses alive beyond the ordinary inact
   assert.equal(result.status, 200);
   assert.deepEqual(result.body, eventBytes);
 });
+
+
+test('upstream DNS address policy blocks private/reserved ranges unless explicitly trusted by hostname', { skip: !startHttpProxy }, async () => {
+  const { isRestrictedUpstreamAddress } = await import('../src/proxy/http.js');
+  for (const address of ['127.0.0.1', '10.2.3.4', '169.254.4.2', '172.16.0.1', '192.168.1.4', '224.0.0.1', '::1', 'fc00::1', 'fe80::1', '::ffff:7f00:1']) {
+    assert.equal(isRestrictedUpstreamAddress(address), true, 'restricted: ' + address);
+  }
+  for (const address of ['8.8.8.8', '1.1.1.1', '2606:4700:4700::1111']) {
+    assert.equal(isRestrictedUpstreamAddress(address), false, 'public: ' + address);
+  }
+});
+
+test('HTTP proxy forwards validated configured upstream headers without logging their values', { skip: !startHttpProxy }, async (t) => {
+  let observedHeaders;
+  const upstream = createServer(async (request, response) => {
+    observedHeaders = request.headers;
+    for await (const _chunk of request) { /* Drain request body. */ }
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end('{"jsonrpc":"2.0","id":44,"result":{"ok":true}}');
+  });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  const address = upstream.address();
+  const previous = process.env.MCP_INSPECTOR_UPSTREAM_HEADERS;
+  process.env.MCP_INSPECTOR_UPSTREAM_HEADERS = JSON.stringify({ 'x-api-key': 'test-only-secret', 'x-tenant': 'qa' });
+  const proxy = startHttpProxy({ upstream: 'http://127.0.0.1:' + address.port, listen: '127.0.0.1:0' });
+  if (!proxy.server.listening) await once(proxy.server, 'listening');
+  const proxyAddress = proxy.server.address();
+  t.after(async () => {
+    await proxy.close();
+    await new Promise((resolveClose) => upstream.close(resolveClose));
+    if (previous === undefined) delete process.env.MCP_INSPECTOR_UPSTREAM_HEADERS;
+    else process.env.MCP_INSPECTOR_UPSTREAM_HEADERS = previous;
+  });
+  const result = await new Promise((resolve, reject) => {
+    const request = httpRequest({ hostname: '127.0.0.1', port: proxyAddress.port, path: '/mcp', method: 'POST', headers: { 'content-type': 'application/json' } }, (response) => {
+      response.resume();
+      response.on('end', () => resolve(response.statusCode));
+      response.on('error', reject);
+    });
+    request.on('error', reject);
+    request.end('{"jsonrpc":"2.0","id":44,"method":"ping"}');
+  });
+  assert.equal(result, 200);
+  assert.equal(observedHeaders['x-api-key'], 'test-only-secret');
+  assert.equal(observedHeaders['x-tenant'], 'qa');
+});
+
+test('upstream header config fails closed for unsafe or conflicting headers', { skip: !startHttpProxy }, async () => {
+  const previousHeaders = process.env.MCP_INSPECTOR_UPSTREAM_HEADERS;
+  const previousToken = process.env.MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN;
+  try {
+    process.env.MCP_INSPECTOR_UPSTREAM_HEADERS = JSON.stringify({ Host: 'attacker.invalid' });
+    assert.throws(() => startHttpProxy({ upstream: 'http://127.0.0.1:3000' }), /cannot override hop-by-hop, host, or content-length/);
+    process.env.MCP_INSPECTOR_UPSTREAM_HEADERS = JSON.stringify({ authorization: 'Basic abc' });
+    process.env.MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN = 'secret-token';
+    assert.throws(() => startHttpProxy({ upstream: 'http://127.0.0.1:3000' }), /not both/);
+  } finally {
+    if (previousHeaders === undefined) delete process.env.MCP_INSPECTOR_UPSTREAM_HEADERS;
+    else process.env.MCP_INSPECTOR_UPSTREAM_HEADERS = previousHeaders;
+    if (previousToken === undefined) delete process.env.MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN;
+    else process.env.MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN = previousToken;
+  }
+});
+
+test('private literal upstreams require explicit exact-host allowlisting', { skip: !startHttpProxy }, async (t) => {
+  const previous = process.env.MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS;
+  try {
+    delete process.env.MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS;
+    assert.throws(
+      () => startHttpProxy({ upstream: 'http://192.168.1.20:80', listen: '127.0.0.1:0' }),
+      /Private or special-use IP upstreams require an exact entry/,
+    );
+    process.env.MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS = '192.168.1.20';
+    const proxy = startHttpProxy({ upstream: 'http://192.168.1.20:80', listen: '127.0.0.1:0' });
+    if (!proxy.server.listening) await once(proxy.server, 'listening');
+    t.after(() => proxy.close());
+  } finally {
+    if (previous === undefined) delete process.env.MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS;
+    else process.env.MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS = previous;
+  }
+});
