@@ -6,7 +6,8 @@ import { startStdioProxy } from './proxy/stdio.js';
 import { startHttpProxy } from './proxy/http.js';
 import { initializeTelemetry, shutdownTelemetry } from './observability/telemetry.js';
 import { compareContracts, readContract } from './contracts/contract.js';
-import { logError } from './observability/logger.js';
+import { log, logError } from './observability/logger.js';
+import { startDashboardServer } from './dashboard/server.js';
 
 const require = createRequire(import.meta.url);
 const packageInfo = require('../package.json');
@@ -21,7 +22,13 @@ Usage:
   mcp-inspector fuzz [--case-mode valid|invalid|mixed] [--max-cases 30] [--protocol legacy|auto|modern] [--execute --allow-side-effects] -- <server-command> [args...]
   mcp-inspector workflow --file <workflow.json> [--execute --allow-side-effects] -- <server-command> [args...]
   mcp-inspector contract-diff --baseline <old.json> --current <new.json>
+  mcp-inspector dashboard --upstream <url> [--proxy-listen 127.0.0.1:9900] [--dashboard-listen 127.0.0.1:9911]
+  mcp-inspector dashboard --stdio [--dashboard-listen 127.0.0.1:9911] -- <server-command> [args...]
   mcp-inspector help
+
+Dashboard:
+  The dashboard is local-only and read-only. It displays sanitized metadata from the same process.
+  Use exactly one of --upstream or --stdio. Browser reports are parsed locally, never uploaded.
 
 Proxy options:
   --upstream <origin>          HTTP reverse proxy mode (e.g. http://127.0.0.1:3000)
@@ -140,6 +147,64 @@ async function commandProxy(args) {
   await proxy.done;
 }
 
+async function commandDashboard(args) {
+  const options = parseOptions(args, {
+    boolean: ['stdio', 'update-contract'],
+    value: ['upstream', 'proxy-listen', 'dashboard-listen', 'contract-file', 'contract-source'],
+  });
+  const useStdio = options.stdio === true;
+  const useHttp = typeof options.upstream === 'string';
+  if (useStdio === useHttp) throw new Error('Choose exactly one dashboard mode: --stdio or --upstream <url>');
+  if (useStdio && !options.commandArgs.length) throw new Error('A server command is required after -- in --stdio mode');
+  if (useHttp && options.commandArgs.length) throw new Error('HTTP dashboard mode does not take a server command after --');
+  if (options.proxyListen && !useHttp) throw new Error('--proxy-listen applies only with --upstream');
+  const dashboard = await startDashboardServer({
+    listen: options.dashboardListen ?? '127.0.0.1:9911',
+    version: packageInfo.version,
+  });
+  let proxy;
+  try {
+    if (useStdio) {
+      proxy = startStdioProxy(options.commandArgs[0], options.commandArgs.slice(1), options);
+      log('info', 'dashboard.started', { dashboard_url: dashboard.url, transport: 'stdio' });
+      await proxy.done;
+    } else {
+      proxy = startHttpProxy({
+        upstream: options.upstream,
+        listen: options.proxyListen ?? '127.0.0.1:9900',
+        contractFile: options.contractFile,
+        contractSource: options.contractSource,
+        updateContract: options.updateContract === true,
+      });
+      log('info', 'dashboard.started', { dashboard_url: dashboard.url, transport: 'http' });
+      await new Promise((resolveDone) => {
+        let stopping = false;
+        const cleanup = () => {
+          process.removeListener('SIGINT', stop);
+          process.removeListener('SIGTERM', stop);
+          proxy.server.removeListener('close', onClose);
+        };
+        const stop = () => {
+          if (stopping) return;
+          stopping = true;
+          cleanup();
+          void proxy.close().finally(resolveDone);
+        };
+        const onClose = () => {
+          cleanup();
+          resolveDone();
+        };
+        process.once('SIGINT', stop);
+        process.once('SIGTERM', stop);
+        proxy.server.once('close', onClose);
+      });
+    }
+  } finally {
+    if (useHttp && proxy) await proxy.close();
+    await dashboard.close();
+  }
+}
+
 async function commandSnapshot(args) {
   const options = parseOptions(args, { value: ['output', 'protocol'] });
   if (!options.output) throw new Error('--output is required');
@@ -239,6 +304,7 @@ async function main() {
   try {
     switch (command) {
       case 'proxy': await commandProxy(args); break;
+      case 'dashboard': await commandDashboard(args); break;
       case 'snapshot': await commandSnapshot(args); break;
       case 'fuzz': await commandFuzz(args); break;
       case 'workflow': await commandWorkflow(args); break;

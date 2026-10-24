@@ -2,7 +2,7 @@
 
 **Protocol-level observability, contract drift detection, and schema-driven fuzzing for Model Context Protocol (MCP) systems.**
 
-MCP Inspector is a local-first CLI that sits between an MCP client and server or proxies Streamable HTTP traffic. It forwards original transport bytes and performs bounded, side-channel inspection so teams can investigate latency, JSON-RPC failures, tool-schema drift, and edge-case tool handling without logging prompts or tool arguments by default.
+MCP Inspector is a local-first CLI with a built-in web dashboard. It sits between an MCP client and server or proxies Streamable HTTP traffic. It forwards original transport bytes and performs bounded, side-channel inspection so teams can investigate latency, JSON-RPC failures, tool-schema drift, and edge-case tool handling without logging prompts or tool arguments by default.
 
 > **Release status:** early-stage software. Unit and local proxy tests are available, and an official-SDK interoperability suite is included for CI. Run the full dependency-backed suite, inspect the SBOM and audit findings, and benchmark your own servers before production use. Remote HTTP binding is not an authenticated gateway.
 
@@ -133,6 +133,28 @@ mcp-inspector workflow --file workflow.example.json --protocol auto -- node ./fi
 ```
 
 To execute this disposable, side-effect-free fixture's workflow, add `--execute --allow-side-effects` before the `--` separator. References resolve only during execution when an earlier step returned successfully. In dry-run mode, unresolved dependencies are reported rather than replaced with made-up values. JSON Pointer traversal blocks prototype-related keys.
+
+## Local web dashboard
+
+The dashboard is served by the same inspector process that observes traffic. It uses the Node.js built-in HTTP server and Server-Sent Events, with no extra frontend dependencies or build step. It is read-only and always binds to loopback.
+
+For an HTTP-based MCP server:
+
+```bash
+node ./src/cli.js dashboard --upstream http://127.0.0.1:3000 --proxy-listen 127.0.0.1:9900 --dashboard-listen 127.0.0.1:9911
+```
+
+Point the MCP client at the proxy endpoint (for example, `http://127.0.0.1:9900/mcp`) and open `http://127.0.0.1:9911` in a browser. The dashboard shows live request/response metadata, measured response durations, recent protocol warnings, and contract events emitted by that proxy process.
+
+For a stdio-based server, use the dashboard mode as the command in your MCP client's server configuration:
+
+```bash
+node /absolute/path/to/mcp-inspector/src/cli.js dashboard --stdio -- <server-command> [args...]
+```
+
+Open `http://127.0.0.1:9911` while that client-launched process is running. For stdio, stdout remains the MCP protocol channel; dashboard diagnostics stay on stderr. The dashboard binds to loopback only, rejects non-local browser Origins and Host headers, serves a strict Content Security Policy, and offers no API for starting arbitrary commands. Event retention is bounded and whitelists operational fields; tool arguments, prompts and results are not captured. Exported session data contains sanitized metadata only.
+
+Use **Contracts** to compare two existing contract JSON files locally in the browser. Use **Fuzz reports** to load the JSON produced by `mcp-inspector fuzz`; the files are parsed in the browser and are not uploaded to the inspector server. These views review existing snapshots and reports rather than launching fuzz jobs from the browser.
 
 ## Observability and configuration
 

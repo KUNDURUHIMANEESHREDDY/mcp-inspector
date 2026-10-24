@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>MCP Inspector — Dashboard</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <svg class="icon-sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+    <symbol id="i-activity" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5M3 16l9 5 9-5"/></symbol>
+    <symbol id="i-flask" viewBox="0 0 24 24"><path d="M9 3h6M10 3v6l-6 9a2 2 0 0 0 1.7 3h12.6A2 2 0 0 0 20 18l-6-9V3"/><path d="M8 15h8"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5M12 15V3"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></symbol>
+    <symbol id="i-radio" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8a6 6 0 0 1 0 8.4M7.8 16.2a6 6 0 0 1 0-8.4M19 5a10 10 0 0 1 0 14M5 19A10 10 0 0 1 5 5"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="m10.3 3.9-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3.1l-8-14a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M12 15h5"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6M8 13h8M8 17h8"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.6 9a7 7 0 0 1 11.7-2L20 12M4 12l2.7 5a7 7 0 0 0 11.7-2"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M7 17 17 7M7 7h10v10"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11Z"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="m18 6-12 12M6 6l12 12"/></symbol>
+  </svg>
+
+  <div class="shell">
+    <aside class="sidebar">
+      <a class="brand" href="/" aria-label="MCP Inspector dashboard home">
+        <span class="brand-mark">M</span>
+        <span class="brand-copy"><strong>MCP Inspector</strong><small>PROTOCOL OBSERVABILITY</small></span>
+      </a>
+      <div class="workspace-label">WORKSPACE</div>
+      <nav class="nav" aria-label="Dashboard sections">
+        <button class="nav-item active" data-view="overview"><svg class="icon"><use href="#i-grid"/></svg><span>Overview</span><span class="nav-dot"></span></button>
+        <button class="nav-item" data-view="traces"><svg class="icon"><use href="#i-activity"/></svg><span>Live traces</span><span id="trace-nav-count" class="nav-count">0</span></button>
+        <button class="nav-item" data-view="contracts"><svg class="icon"><use href="#i-layers"/></svg><span>Contracts</span></button>
+        <button class="nav-item" data-view="fuzz"><svg class="icon"><use href="#i-flask"/></svg><span>Fuzz reports</span></button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="local-card">
+          <div class="local-icon"><svg class="icon"><use href="#i-shield"/></svg></div>
+          <div><strong>Local session</strong><p>Payload capture is disabled. Events stay in this process.</p></div>
+        </div>
+        <div class="sidebar-meta"><span class="status-led"></span><span id="sidebar-connection">Connecting to inspector</span></div>
+        <div class="sidebar-version">MCP INSPECTOR <span id="app-version">v0.1.0</span></div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="heading">
+          <div class="breadcrumbs"><span>LOCAL INSTANCE</span><svg class="icon tiny"><use href="#i-chevron"/></svg><span id="breadcrumb-view">OVERVIEW</span></div>
+          <h1 id="page-title">Operational overview</h1>
+          <p id="page-subtitle">Protocol activity and tool health, in one place.</p>
+        </div>
+        <div class="top-actions">
+          <label class="search-box"><svg class="icon"><use href="#i-search"/></svg><input id="global-search" type="search" placeholder="Search events..." autocomplete="off" aria-label="Search events"><kbd>SLASH</kbd></label>
+          <button id="export-events" class="button quiet"><svg class="icon"><use href="#i-download"/></svg><span>Export session</span></button>
+        </div>
+      </header>
+
+      <div class="session-bar">
+        <div class="session-left"><span id="connection-led" class="status-led"></span><span id="connection-label">Connecting to local event stream…</span><span class="session-separator"></span><span class="mono" id="session-url">127.0.0.1</span></div>
+        <div class="session-right"><span class="privacy-label"><svg class="icon"><use href="#i-shield"/></svg> Metadata only</span><button id="pause-stream" class="button mini quiet" type="button">Pause updates</button></div>
+      </div>
+
+      <section id="view-overview" class="view active" aria-labelledby="page-title">
+        <div class="page-intro">
+          <div><div class="eyebrow">SESSION HEALTH</div><h2>Your MCP surface, at a glance.</h2><p>Request traces, protocol failures and contract changes from this inspector process.</p></div>
+          <div class="intro-tag"><span class="pulse"></span> LIVE OBSERVATION</div>
+        </div>
+        <div class="metrics-grid">
+          <article class="metric-card"><div class="metric-top"><span>RPC requests</span><span class="metric-icon blue"><svg class="icon"><use href="#i-radio"/></svg></span></div><div id="metric-requests" class="metric-value">0</div><div class="metric-foot"><span class="metric-caption">Observed requests</span><span id="metric-request-delta" class="metric-note">This session</span></div></article>
+          <article class="metric-card"><div class="metric-top"><span>Median latency</span><span class="metric-icon violet"><svg class="icon"><use href="#i-clock"/></svg></span></div><div id="metric-latency" class="metric-value">—</div><div class="metric-foot"><span class="metric-caption">Completed RPC calls</span><span id="metric-p95" class="metric-note">p95 —</span></div></article>
+          <article class="metric-card"><div class="metric-top"><span>Protocol errors</span><span class="metric-icon red"><svg class="icon"><use href="#i-alert"/></svg></span></div><div id="metric-errors" class="metric-value">0</div><div class="metric-foot"><span class="metric-caption">Errors and warnings</span><span id="metric-error-note" class="metric-note">No issues reported</span></div></article>
+          <article class="metric-card"><div class="metric-top"><span>Breaking changes</span><span class="metric-icon amber"><svg class="icon"><use href="#i-layers"/></svg></span></div><div id="metric-contracts" class="metric-value">0</div><div class="metric-foot"><span class="metric-caption">Contract diff findings</span><span class="metric-note">Schema compatibility</span></div></article>
+        </div>
+
+        <div class="dashboard-grid two-up">
+          <article class="panel chart-panel">
+            <div class="panel-heading"><div><h3>Latency distribution</h3><p>Recent completed RPC responses</p></div><span id="latency-sample-count" class="subtle-chip">0 samples</span></div>
+            <div class="chart-wrap"><svg id="latency-chart" class="chart" viewBox="0 0 640 190" role="img" aria-label="Recent RPC response latency chart"></svg></div>
+            <div class="chart-legend"><span><i class="legend-dot blue-dot"></i> Response duration</span><span>Milliseconds</span></div>
+          </article>
+          <article class="panel distribution-panel">
+            <div class="panel-heading"><div><h3>Event distribution</h3><p>Retained event stream</p></div><span class="subtle-chip">Live</span></div>
+            <div class="distribution-content">
+              <div class="distribution-ring" id="distribution-ring"><div><strong id="distribution-total">0</strong><span>events</span></div></div>
+              <div class="distribution-legend">
+                <div><span class="legend-key"><i class="legend-dot blue-dot"></i> Requests</span><strong id="distribution-requests">0</strong></div>
+                <div><span class="legend-key"><i class="legend-dot green-dot"></i> Responses</span><strong id="distribution-responses">0</strong></div>
+                <div><span class="legend-key"><i class="legend-dot red-dot"></i> Warnings</span><strong id="distribution-errors">0</strong></div>
+              </div>
+            </div>
+            <div class="panel-footnote">Only bounded, sanitized event metadata is retained.</div>
+          </article>
+        </div>
+
+        <div class="dashboard-grid trace-grid">
+          <article class="panel table-panel">
+            <div class="panel-heading"><div><h3>Live activity</h3><p>Latest requests, responses and protocol events</p></div><button class="text-button" data-view="traces">View all <svg class="icon tiny"><use href="#i-arrow"/></svg></button></div>
+            <div class="table-scroll"><table><thead><tr><th>EVENT</th><th>METHOD / TOOL</th><th>TRANSPORT</th><th>DURATION</th><th>STATUS</th></tr></thead><tbody id="overview-events"></tbody></table></div>
+            <div id="overview-empty" class="empty-state"><div class="empty-icon"><svg class="icon"><use href="#i-activity"/></svg></div><strong>Waiting for MCP traffic</strong><p>Start a proxied MCP session to see live request and response metadata here.</p></div>
+          </article>
+          <aside class="panel detail-panel">
+            <div class="panel-heading"><div><h3>Event details</h3><p>Sanitized protocol metadata</p></div><span class="detail-badge">READ ONLY</span></div>
+            <div id="event-details" class="details-empty"><svg class="icon"><use href="#i-file"/></svg><span>Select an event to inspect its metadata.</span></div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="view-traces" class="view" aria-label="Live traces">
+        <div class="page-intro compact"><div><div class="eyebrow">TRACE EXPLORER</div><h2>Live protocol events</h2><p>Search and filter request/response metadata. Payloads and tool arguments are intentionally excluded.</p></div><div class="filter-controls"><select id="trace-filter" aria-label="Filter events"><option value="all">All events</option><option value="requests">Requests</option><option value="responses">Responses</option><option value="errors">Warnings & errors</option><option value="tools">Tool calls</option></select></div></div>
+        <article class="panel table-panel full-table"><div class="panel-heading"><div><h3>Event stream</h3><p id="trace-count">0 events retained</p></div><span class="live-pill"><span class="pulse"></span> Live</span></div><div class="table-scroll"><table><thead><tr><th>TIME</th><th>EVENT</th><th>METHOD / TOOL</th><th>TRANSPORT</th><th>DURATION</th><th>STATUS</th></tr></thead><tbody id="trace-events"></tbody></table></div><div id="trace-empty" class="empty-state"><div class="empty-icon"><svg class="icon"><use href="#i-radio"/></svg></div><strong>No matching events</strong><p>Traffic will appear here when an MCP client uses this inspector.</p></div></article>
+        <div class="privacy-note"><svg class="icon"><use href="#i-shield"/></svg><span>Event details contain protocol metadata only. Request arguments, prompts and tool results are not captured by the dashboard.</span></div>
+      </section>
+
+      <section id="view-contracts" class="view" aria-label="Contract drift">
+        <div class="page-intro compact"><div><div class="eyebrow">SCHEMA GOVERNANCE</div><h2>Contract intelligence</h2><p>Track captured tool inventories and compare two exported contract snapshots locally in your browser.</p></div><span class="subtle-chip">No file uploads to server</span></div>
+        <div class="metrics-grid three-up">
+          <article class="metric-card"><div class="metric-top"><span>Captured snapshots</span><span class="metric-icon blue"><svg class="icon"><use href="#i-file"/></svg></span></div><div id="contract-captured-count" class="metric-value">0</div><div class="metric-foot"><span class="metric-caption">From this live session</span></div></article>
+          <article class="metric-card"><div class="metric-top"><span>Breaking alerts</span><span class="metric-icon red"><svg class="icon"><use href="#i-alert"/></svg></span></div><div id="contract-breaking-count" class="metric-value">0</div><div class="metric-foot"><span class="metric-caption">Logged contract diffs</span></div></article>
+          <article class="metric-card"><div class="metric-top"><span>Latest fingerprint</span><span class="metric-icon violet"><svg class="icon"><use href="#i-shield"/></svg></span></div><div id="contract-latest-hash" class="metric-value hash-value">Not captured</div><div class="metric-foot"><span class="metric-caption">SHA-256 contract digest</span></div></article>
+        </div>
+        <article class="panel compare-panel"><div class="panel-heading"><div><h3>Compare contract snapshots</h3><p>Select local JSON files. The comparison runs in your browser only.</p></div></div><div class="contract-inputs"><label class="file-drop"><span class="file-drop-icon"><svg class="icon"><use href="#i-file"/></svg></span><span class="file-drop-copy"><strong>Baseline contract</strong><small id="baseline-name">Choose the earlier .json snapshot</small></span><input id="baseline-file" type="file" accept=".json,application/json"></label><label class="file-drop"><span class="file-drop-icon"><svg class="icon"><use href="#i-file"/></svg></span><span class="file-drop-copy"><strong>Current contract</strong><small id="current-name">Choose the newer .json snapshot</small></span><input id="current-file" type="file" accept=".json,application/json"></label><button id="compare-contracts" class="button primary" type="button"><svg class="icon"><use href="#i-layers"/></svg> Compare contracts</button></div><div id="contract-compare-result" class="compare-result"><div class="empty-state compact-empty"><strong>Ready for a comparison</strong><p>Load two contract snapshots to identify removed tools and changed input schemas.</p></div></div></article>
+        <article class="panel"><div class="panel-heading"><div><h3>Live contract events</h3><p>Contract captures and comparison findings emitted by the inspector process.</p></div></div><div id="contract-event-list" class="contract-events"><div class="empty-state compact-empty"><strong>No contract events yet</strong><p>Capture or compare a contract with the CLI to populate this timeline.</p></div></div></article>
+      </section>
+
+      <section id="view-fuzz" class="view" aria-label="Fuzz reports">
+        <div class="page-intro compact"><div><div class="eyebrow">TEST INTELLIGENCE</div><h2>Fuzz-test reports</h2><p>Review generated schema cases and results from an authorized MCP test run.</p></div><span class="subtle-chip">Local file parsing</span></div>
+        <article class="panel report-import-panel"><div class="report-import-icon"><svg class="icon"><use href="#i-file"/></svg></div><div class="report-import-copy"><h3>Import a fuzz report</h3><p>Choose the JSON output produced by <code>mcp-inspector fuzz</code>. The file is parsed locally and is not uploaded.</p><label class="button primary file-button">Choose JSON report<input id="fuzz-file" type="file" accept=".json,application/json"></label></div></article>
+        <div id="fuzz-report-area"><div class="panel"><div class="empty-state"><div class="empty-icon"><svg class="icon"><use href="#i-flask"/></svg></div><strong>No report loaded</strong><p>Run fuzzing in dry-run mode first, then import its JSON output here. Real tool execution requires explicit safety flags.</p></div></div></div>
+        <div class="privacy-note"><svg class="icon"><use href="#i-shield"/></svg><span>Schema-valid inputs can still have side effects. Only execute cases against disposable test servers you are authorized to test.</span></div>
+      </section>
+
+      <footer class="app-footer"><span>MCP INSPECTOR <span id="footer-version">v0.1.0</span></span><span><i class="status-led"></i> Local-only dashboard · Payload logging off</span></footer>
+    </main>
+  </div>
+  <div id="toast-region" class="toast-region" role="status" aria-live="polite"></div>
+</body>
+</html>
