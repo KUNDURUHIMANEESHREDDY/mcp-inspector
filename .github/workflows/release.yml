@@ -1,0 +1,55 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Verify and publish source artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+      - name: Set up Node.js
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24'
+      - name: Verify tag matches package version
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          RELEASE_REF: ${{ github.ref_name }}
+        run: |
+          node --input-type=module -e "import { readFileSync } from 'node:fs'; const p = JSON.parse(readFileSync('package.json', 'utf8')); if ('v' + p.version !== process.env.RELEASE_REF) { console.error('Tag does not match package.json version'); process.exit(1); }"
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Static checks
+        run: npm run check
+      - name: Unit, integration, and SDK tests
+        run: npm test
+      - name: Dependency audit
+        run: npm audit --audit-level=high
+      - name: Generate CycloneDX SBOM
+        run: npm sbom --sbom-format=cyclonedx > mcp-inspector.cdx.json
+      - name: Build source archive and checksums
+        run: |
+          git archive --format=tar.gz --prefix=mcp-inspector/ HEAD -o mcp-inspector-${{ github.ref_name }}.tar.gz
+          sha256sum mcp-inspector-${{ github.ref_name }}.tar.gz mcp-inspector.cdx.json > SHA256SUMS
+      - name: Publish release assets
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            mcp-inspector-${{ github.ref_name }}.tar.gz
+            mcp-inspector.cdx.json
+            SHA256SUMS

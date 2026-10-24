@@ -103,3 +103,19 @@ for (const mode of ['legacy', 'modern']) {
     assert.equal(response.content[0].text, 'echo:http-protocol-ok');
   });
 }
+
+test('fuzz execution honours cancellation before generating cases or invoking tools', { skip: !fuzzServer, timeout: 30_000 }, async () => {
+  const controller = new AbortController();
+  controller.abort();
+  const report = await fuzzServer({
+    command: process.execPath,
+    args: [resolve(root, 'fixtures/sdk-mcp-server.js')],
+    maxCases: 10,
+    caseMode: 'mixed',
+    execute: true,
+    signal: controller.signal,
+  });
+  assert.equal(report.cancelled, true);
+  assert.equal(report.executed, 0);
+  assert.equal(report.totalCandidates, 0);
+});

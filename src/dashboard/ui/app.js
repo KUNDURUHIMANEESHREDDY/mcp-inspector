@@ -81,6 +81,19 @@ function localSummary() {
   const responses = events.filter((event) => event.event === 'rpc.response');
   const latencies = responses.map((event) => event.duration_ms).filter((value) => typeof value === 'number').sort((a, b) => a - b);
   const percentile = (ratio) => latencies.length ? latencies[Math.min(latencies.length - 1, Math.ceil(latencies.length * ratio) - 1)] : null;
+  const now = Date.now();
+  const recent = events.filter((event) => {
+    const timestamp = Date.parse(event.time);
+    return Number.isFinite(timestamp) && timestamp >= now - 60_000 && timestamp <= now;
+  });
+  const recentRequests = recent.filter((event) => event.event === 'rpc.request').length;
+  const recentResponses = recent.filter((event) => event.event === 'rpc.response');
+  const timeouts = events.filter((event) => /timeout/i.test(event.event) || /timeout/i.test(String(event.reason || ''))).length;
+  const failureGroups = new Map();
+  events.filter((event) => event.is_error === true || ['warn', 'error'].includes(event.level)).forEach((event) => {
+    const key = [event.method || 'unknown', event.tool || '', event.error_code ?? event.reason ?? event.event].join('|');
+    failureGroups.set(key, (failureGroups.get(key) || 0) + 1);
+  });
   return {
     requests: requests.length,
     responses: responses.length,
@@ -89,6 +102,12 @@ function localSummary() {
     breakingChanges: events.filter((event) => event.event === 'contract.diff' && event.breaking === true).length,
     latencyP50Ms: percentile(0.5),
     latencyP95Ms: percentile(0.95),
+    latencyP99Ms: percentile(0.99),
+    throughputRequestsPerSecond: Number((recentRequests / 60).toFixed(3)),
+    errorRatePercent: recentResponses.length ? Number((recentResponses.filter((event) => event.is_error === true).length / recentResponses.length * 100).toFixed(2)) : 0,
+    timeouts,
+    schemaDriftEvents: events.filter((event) => event.event === 'contract.diff').length,
+    repeatedFailureGroups: [...failureGroups.values()].filter((count) => count >= 3).length,
     retainedEvents: events.length,
     totalEvents: events.length,
   };
@@ -147,11 +166,12 @@ function renderMetrics() {
   const summary = allSummary();
   byId('metric-requests').textContent = String(summary.requests || 0);
   byId('metric-latency').textContent = summary.latencyP50Ms === null || summary.latencyP50Ms === undefined ? '—' : formatDuration(summary.latencyP50Ms);
-  byId('metric-p95').textContent = 'p95 ' + formatDuration(summary.latencyP95Ms);
+  byId('metric-p95').textContent = 'p95 ' + formatDuration(summary.latencyP95Ms) + ' · p99 ' + formatDuration(summary.latencyP99Ms);
   byId('metric-errors').textContent = String(summary.errors || 0);
-  byId('metric-error-note').textContent = summary.errors ? 'Review event stream' : 'No issues reported';
+  byId('metric-error-note').textContent = 'Error rate ' + safeNumber(summary.errorRatePercent, '%') + ' · ' + String(summary.timeouts || 0) + ' timeouts';
   byId('metric-contracts').textContent = String(summary.breakingChanges || 0);
-  byId('metric-request-delta').textContent = String(summary.toolCalls || 0) + ' tool calls';
+  byId('metric-contract-note').textContent = String(summary.schemaDriftEvents || 0) + ' schema events · ' + String(summary.repeatedFailureGroups || 0) + ' repeated failures';
+  byId('metric-request-delta').textContent = String(summary.toolCalls || 0) + ' tool calls · ' + safeNumber(summary.throughputRequestsPerSecond, ' req/s');
   byId('distribution-total').textContent = String(summary.retainedEvents || 0);
   byId('distribution-requests').textContent = String(summary.requests || 0);
   byId('distribution-responses').textContent = String(summary.responses || 0);

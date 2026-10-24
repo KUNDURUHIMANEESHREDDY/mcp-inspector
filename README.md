@@ -106,6 +106,23 @@ mcp-inspector fuzz --max-cases 30 --case-mode mixed --execute --allow-side-effec
 
 Those two flags are intentionally required together. Even schema-valid arguments may cause side effects because the server controls tool semantics. Start with dry-run and inspect the candidate labels before enabling execution.
 
+### Protocol compatibility suite
+
+Run read-only initialize + tools/list probes against each selected transport and protocol mode. It never invokes a tool.
+
+```bash
+# stdio fixture
+node ./src/cli.js compat --transport stdio -- node ./fixtures/sdk-mcp-server.js
+
+# Streamable HTTP
+node ./src/cli.js compat --transport http --url http://127.0.0.1:3000/mcp
+
+# both transports
+node ./src/cli.js compat --transport both --url http://127.0.0.1:3000/mcp -- node ./fixtures/sdk-mcp-server.js
+```
+
+The JSON report contains one pass/fail result per transport/protocol combination, negotiated protocol era, elapsed time, tool count, and normalized contract hash. Exit code 1 means at least one probe failed. URL credentials are rejected. Results reflect only the target endpoint actually tested; this is not blanket certification of third-party servers.
+
 ### 5. Replay a stateful workflow
 
 `workflow.example.json` demonstrates a workflow that calls the local SDK fixture's `echo` tool and feeds its structured output into `concat`. A reference can read a JSON Pointer from a prior successful tool result:
@@ -158,6 +175,8 @@ Open `http://127.0.0.1:9911` while that client-launched process is running. For 
 Use **Contracts** to compare two existing contract JSON files locally in the browser. Use **Fuzz reports** to load the JSON produced by `mcp-inspector fuzz`; the files are parsed in the browser and are not uploaded to the inspector server. These views review existing snapshots and reports rather than launching fuzz jobs from the browser.
 
 ## Observability and configuration
+
+The dashboard summary includes retained-history p50/p95/p99 latency, 60-second request throughput, response error rate, timeout count, schema-drift events, and repeated-failure groups. Metrics are bounded by the 2,000-event retention buffer and are diagnostic indicators, not a durable time-series backend.
 
 Set these environment variables only when needed:
 
