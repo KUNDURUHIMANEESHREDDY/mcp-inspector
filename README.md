@@ -176,6 +176,8 @@ Use **Contracts** to compare two existing contract JSON files locally in the bro
 
 ## Observability and configuration
 
+Outbound HTTP requests enforce DNS/address checks against private and special-use IP ranges. To intentionally connect to a trusted private upstream, list its exact hostname or IP in `MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS`. This allowlist has no wildcard support. Optional upstream headers can be set with `MCP_INSPECTOR_UPSTREAM_HEADERS` as a JSON object, or configure `MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN`; do not set both for Authorization.
+
 The dashboard summary includes retained-history p50/p95/p99 latency, 60-second request throughput, response error rate, timeout count, schema-drift events, and repeated-failure groups. Metrics are bounded by the 2,000-event retention buffer and are diagnostic indicators, not a durable time-series backend.
 
 Set these environment variables only when needed:
