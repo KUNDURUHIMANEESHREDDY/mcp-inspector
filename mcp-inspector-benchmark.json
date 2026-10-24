@@ -1,0 +1,35 @@
+{
+  "benchmark": "mcp-sdk-stdio-round-trip",
+  "node": "v26.11.1",
+  "samples_per_mode": 150,
+  "note": "Serial round-trips against a local no-op fixture; compare on the same machine. Not a production load test.",
+  "results": [
+    {
+      "mode": "direct-sdk-server",
+      "samples": 150,
+      "protocol_era": "legacy",
+      "latency_ms": {
+        "p50": 0.503,
+        "p95": 0.923,
+        "p99": 1.731,
+        "mean": 0.594
+      }
+    },
+    {
+      "mode": "through-mcp-inspector",
+      "samples": 150,
+      "protocol_era": "legacy",
+      "latency_ms": {
+        "p50": 0.641,
+        "p95": 1.149,
+        "p99": 2.181,
+        "mean": 0.72
+      }
+    }
+  ],
+  "proxy_overhead_ms": {
+    "p50": 0.138,
+    "p95": 0.226,
+    "p99": 0.45
+  }
+}

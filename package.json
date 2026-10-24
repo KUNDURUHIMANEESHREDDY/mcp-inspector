@@ -1,0 +1,53 @@
+{
+  "name": "@kunduruhimaneeshreddy/mcp-inspector",
+  "version": "0.1.0",
+  "description": "Protocol-level observability, contract drift detection, and schema-driven fuzzing for MCP systems",
+  "type": "module",
+  "private": false,
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.0.0",
+    "npm": ">=10.0.0"
+  },
+  "bin": {
+    "mcp-inspector": "./src/cli.js"
+  },
+  "scripts": {
+    "start": "node ./src/cli.js",
+    "test": "node --test",
+    "test:coverage": "node --test --experimental-test-coverage",
+    "check": "node ./scripts/check.js",
+    "audit": "npm audit --omit=dev --audit-level=high",
+    "bench": "node ./bench/framer.js",
+    "bench:e2e": "node ./bench/mcp-roundtrip.js",
+    "prepublishOnly": "npm run check && npm test"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "json-rpc",
+    "observability",
+    "fuzzing",
+    "opentelemetry",
+    "schema-drift",
+    "security-testing"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/client": "2.3.1",
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/exporter-trace-otlp-http": "0.223.0",
+    "@opentelemetry/sdk-node": "0.223.0",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/server": "2.3.1",
+    "zod": "4.6.7"
+  },
+  "files": [
+    "src/",
+    "README.md",
+    "LICENSE",
+    "SECURITY.md"
+  ]
+}

@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Node ${{ matrix.node }} / ubuntu-latest
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22', '24', '26']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+      - name: Set up Node.js
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Static checks
+        run: npm run check
+      - name: Unit and integration tests
+        run: npm test
+      - name: Dependency audit
+        run: npm audit --audit-level=high
+      - name: Dependency-free framing benchmark
+        run: node ./bench/framer.js > mcp-inspector-framer-benchmark.json
+      - name: MCP SDK end-to-end latency benchmark
+        if: matrix.node == '24'
+        run: node ./bench/mcp-roundtrip.js > mcp-inspector-benchmark.json
+      - name: Generate CycloneDX SBOM
+        if: matrix.node == '24'
+        run: npm sbom --sbom-format=cyclonedx > mcp-inspector.cdx.json
+      - name: Upload verification evidence
+        if: matrix.node == '24'
+        uses: actions/upload-artifact@v6.0.0
+        with:
+          name: mcp-inspector-verification-evidence
+          path: |-
+            mcp-inspector.cdx.json
+            mcp-inspector-benchmark.json
+            mcp-inspector-framer-benchmark.json
+          if-no-files-found: error
+          retention-days: 30
+
+  windows-smoke:
+    name: Windows / Node 22
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+      - name: Set up Node.js
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Static checks
+        run: npm run check
+      - name: Unit and integration tests
+        run: npm test
+      - name: Framing benchmark
+        run: node ./bench/framer.js

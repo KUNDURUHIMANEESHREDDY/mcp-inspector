@@ -1,0 +1,35 @@
+{
+  "benchmark": "stdio-proxy-side-channel-microbenchmark",
+  "node": "v26.11.1",
+  "note": "Microbenchmark only; excludes OS pipes, MCP SDK, network transport, OpenTelemetry exporter, and external load.",
+  "results": [
+    {
+      "mode": "transparent-buffer-loop",
+      "batches": 128,
+      "frames_per_batch": 1024,
+      "bytes_processed": 14931200,
+      "elapsed_ms": 0.345,
+      "mib_per_second": 41309.84,
+      "batch_latency_ms": {
+        "p50": 0.002,
+        "p95": 0.003,
+        "p99": 0.01
+      }
+    },
+    {
+      "mode": "side-channel-framing-and-jsonrpc-validation",
+      "batches": 128,
+      "frames_per_batch": 1024,
+      "bytes_processed": 14931200,
+      "elapsed_ms": 319.356,
+      "mib_per_second": 44.59,
+      "batch_latency_ms": {
+        "p50": 2.136,
+        "p95": 4.094,
+        "p99": 7.623
+      },
+      "observed_frames": 131072
+    }
+  ],
+  "estimated_parser_cost_ms_per_batch": 2.134
+}

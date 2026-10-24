@@ -1,0 +1,6 @@
+// Minimal JSON-RPC echo process used only to verify byte-transparent stdio plumbing.
+import { createInterface } from 'node:readline';
+const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
+input.on('line', (line) => {
+  process.stdout.write(`${line}\n`);
+});

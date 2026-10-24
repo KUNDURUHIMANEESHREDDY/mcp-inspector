@@ -1,0 +1,194 @@
+# MCP Inspector
+
+**Protocol-level observability, contract drift detection, and schema-driven fuzzing for Model Context Protocol (MCP) systems.**
+
+MCP Inspector is a local-first CLI that sits between an MCP client and server or proxies Streamable HTTP traffic. It forwards original transport bytes and performs bounded, side-channel inspection so teams can investigate latency, JSON-RPC failures, tool-schema drift, and edge-case tool handling without logging prompts or tool arguments by default.
+
+> **Release status:** early-stage software. Unit and local proxy tests are available, and an official-SDK interoperability suite is included for CI. Run the full dependency-backed suite, inspect the SBOM and audit findings, and benchmark your own servers before production use. Remote HTTP binding is not an authenticated gateway.
+
+## Windows quick start
+
+1. Install Node.js 22 or newer, Git, and npm.
+2. Extract this repository ZIP.
+3. Double-click `RUN_LOCAL_CHECKS.bat` first. It installs dependencies and runs static checks, tests, the dependency audit, and benchmarks. The window stays open on success or failure.
+4. After local verification succeeds, run `gh auth login` in PowerShell and double-click `PUSH_TO_GITHUB.bat` to create/push the repository.
+
+If an older extracted copy reports an OpenTelemetry `ERESOLVE` error, run `FIX_OTEL_DEPENDENCY.bat` once; it pins the API package to a version accepted by the selected SDK, then retries dependency installation. If a script stops for another reason, copy the error text from the terminal; a failed check intentionally prevents publishing.
+
+## What it does
+
+- **Transparent stdio proxy:** launches a target command without a shell, forwards standard input/output bytes unchanged, keeps diagnostics on stderr, and observes newline-framed JSON-RPC messages on a bounded side channel.
+- **Streamable HTTP/SSE reverse proxy:** forwards HTTP bodies without buffering the whole exchange, inspects JSON/SSE events within configured memory limits, strips hop-by-hop headers (including connection-nominated headers), and binds to loopback by default.
+- **Protocol inspection:** correlates requests and responses using transport/session scope and JSON-RPC IDs; records method, tool name, bytes, duration, timeout, and protocol error metadata without recording arguments or results.
+- **OpenTelemetry traces:** emits MCP/JSON-RPC spans through the OpenTelemetry API. Configure an OTLP/HTTP endpoint to export traces. Valid W3C `traceparent` values can parent spans; only well-formed hexadecimal or UUID trace IDs are accepted as correlation attributes.
+- **Contract snapshots and drift detection:** captures `tools/list` responses, writes atomic JSON baselines, hashes normalized tool schemas, and reports likely breaking changes.
+- **Schema-driven fuzzing:** derives schema-valid boundary cases plus intentionally schema-invalid cases. Dry-run is the default. Invoking real tools requires both `--execute` and `--allow-side-effects`.
+- **Stateful workflow replay:** run ordered tool-call scenarios. Successful earlier responses can feed later arguments using JSON Pointer references; unresolved and forward references are rejected.
+
+## Requirements
+
+- Node.js **22 or newer** and npm 10 or newer.
+- Git is only needed for contributing.
+- An OTLP/HTTP trace collector is optional.
+
+Install dependencies from a clone or extracted source directory:
+
+```bash
+npm install
+npm run check
+npm test
+```
+
+The OpenTelemetry SDK/exporter versions are pinned together at `0.223.0`; `@opentelemetry/api` is pinned to `1.9.1` because SDK `0.223.0` declares a peer range below `1.10.0`. Do not use `--force` or `--legacy-peer-deps` to bypass this compatibility check. The SDK-backed interoperability tests use the official MCP TypeScript SDK v2 and a small local fixture server. If dependency installation fails, those tests cannot execute; do not treat skipped tests as passing evidence. This source archive omits a generated `package-lock.json` because registry access was unavailable during assembly; the Windows publishing helper creates the lockfile during a successful install and commits it before pushing. For any other release path, generate and commit the lockfile before accepting the release.
+
+## Quick start
+
+### 1. Inspect an MCP server without changing your client
+
+Wrap the server command normally used by your MCP client:
+
+```bash
+mcp-inspector proxy -- npx -y @modelcontextprotocol/server-filesystem ./workspace
+```
+
+In your MCP client configuration, run the same command as the server executable, replacing it with `node /absolute/path/to/mcp-inspector/src/cli.js proxy -- npx -y @modelcontextprotocol/server-filesystem ./workspace` (quote arguments as required by your client). Because stdout is the MCP protocol channel, logs and diagnostics go to stderr.
+
+The proxy does not know what the wrapped server's original executable or arguments should be. Use your actual configuration and avoid copying secrets into command lines or process listings.
+
+### 2. Proxy a Streamable HTTP endpoint
+
+```bash
+mcp-inspector proxy --upstream http://127.0.0.1:3000 --listen 127.0.0.1:9900
+```
+
+Point the MCP client at `http://127.0.0.1:9900/mcp` if your upstream endpoint is `/mcp`. The proxy preserves the incoming path and query string relative to the configured upstream origin. Use an upstream URL without username/password credentials.
+
+For a private upstream, set `MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN` in the process environment. Credentials are not read from the upstream URL. The token is sent only over HTTPS for non-loopback upstream hosts.
+
+**Do not add `--allow-remote` unless you have placed an authenticated, TLS-terminating, rate-limiting gateway in front of the proxy.** That flag only changes the bind check; it does not add authentication, authorization, TLS, or rate limits.
+
+### 3. Capture a tool contract
+
+```bash
+mcp-inspector snapshot --output .mcp-inspector/contracts/filesystem.json --protocol auto -- npx -y @modelcontextprotocol/server-filesystem ./workspace
+```
+
+Capture again after a server update and compare:
+
+```bash
+mcp-inspector contract-diff \
+  --baseline .mcp-inspector/contracts/filesystem-before.json \
+  --current .mcp-inspector/contracts/filesystem-after.json
+```
+
+Exit code `1` indicates that the report contains a potentially breaking change. Keep baselines under version control only if the tool inventory and schema metadata are appropriate for your repository.
+
+### 4. Generate fuzz candidates
+
+Safe default: generate and report candidates without making any tool call.
+
+```bash
+mcp-inspector fuzz --max-cases 50 --case-mode mixed --protocol auto -- npx -y @modelcontextprotocol/server-filesystem ./workspace
+```
+
+Case modes:
+
+- `valid`: schema-valid baseline and boundary candidates (default).
+- `invalid`: candidates intended to violate the advertised input schema.
+- `mixed`: a bounded mixture of both.
+
+To execute cases against a **disposable, authorized test server**:
+
+```bash
+mcp-inspector fuzz --max-cases 30 --case-mode mixed --execute --allow-side-effects --protocol auto -- node ./fixtures/sdk-mcp-server.js
+```
+
+Those two flags are intentionally required together. Even schema-valid arguments may cause side effects because the server controls tool semantics. Start with dry-run and inspect the candidate labels before enabling execution.
+
+### 5. Replay a stateful workflow
+
+`workflow.example.json` demonstrates a workflow that calls the local SDK fixture's `echo` tool and feeds its structured output into `concat`. A reference can read a JSON Pointer from a prior successful tool result:
+
+```json
+{
+  "name": "echo-then-concat",
+  "steps": [
+    { "id": "source", "tool": "echo", "arguments": { "message": "stateful-workflow" } },
+    {
+      "id": "combine",
+      "tool": "concat",
+      "arguments": {
+        "left": { "$ref": "source#/structuredContent/echo" },
+        "right": "-verified"
+      }
+    }
+  ]
+}
+```
+
+Run the workflow in dry-run mode:
+
+```bash
+mcp-inspector workflow --file workflow.example.json --protocol auto -- node ./fixtures/sdk-mcp-server.js
+```
+
+To execute this disposable, side-effect-free fixture's workflow, add `--execute --allow-side-effects` before the `--` separator. References resolve only during execution when an earlier step returned successfully. In dry-run mode, unresolved dependencies are reported rather than replaced with made-up values. JSON Pointer traversal blocks prototype-related keys.
+
+## Observability and configuration
+
+Set these environment variables only when needed:
+
+| Variable | Default | Purpose |
+|---|---:|---|
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | unset | Export traces using OTLP/HTTP, e.g. `http://127.0.0.1:4318/v1/traces` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | Standard OTLP endpoint fallback |
+| `OTEL_SERVICE_NAME` | `mcp-inspector` | Service name recognized by the OpenTelemetry SDK |
+| `MCP_INSPECTOR_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error` |
+| `MCP_INSPECTOR_MAX_FRAME_BYTES` | `16777216` | Maximum inspected JSON-RPC frame / SSE event in bytes |
+| `MCP_INSPECTOR_RPC_TIMEOUT_MS` | `120000` | Pending request timeout, from 1 second to 1 hour |
+| `MCP_INSPECTOR_MAX_PENDING_REQUESTS` | `10000` | Maximum pending RPC correlations per transport store |
+| `MCP_INSPECTOR_SESSION_IDLE_MS` | `1800000` | Legacy HTTP session idle TTL, 1 minute to 24 hours |
+| `MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN` | unset | Optional bearer token for the configured HTTP upstream |
+| `MCP_INSPECTOR_UPSTREAM_TIMEOUT_MS` | `120000` | Upstream inactivity timeout, from 1 second to 1 hour |
+| `MCP_INSPECTOR_ALLOWED_ORIGINS` | unset | Exact comma-separated browser Origin allowlist; required for remote browser access |
+
+The HTTP proxy binds to loopback by default. For browser requests, it rejects non-loopback Host values and only permits loopback Origins unless `MCP_INSPECTOR_ALLOWED_ORIGINS` lists exact canonical origins. Remote bindings require `--allow-remote`; place an authenticated gateway in front and configure the origin allowlist before enabling browser access. The proxy enforces Origin validation in line with the MCP Streamable HTTP security requirements.
+
+Logs are structured JSON on stderr. Request arguments, prompts, and tool results are not logged or attached to spans. String JSON-RPC IDs are hashed before being used in metadata. Tool names, schema names, endpoint paths, server identity, error details, and exported traces can still be sensitive operational metadata; protect logs and collector access accordingly.
+
+## Validation, CI, and performance
+
+```bash
+npm run check
+npm test
+npm run bench
+npm run bench:e2e
+npm audit --audit-level=high
+```
+
+- `npm run check` parses every project JavaScript file and validates JSON manifests.
+- `npm test` runs unit tests, HTTP and stdio proxy integration tests, workflow-reference security tests, and—when dependencies are installed—official MCP SDK legacy/modern interoperability plus schema fuzzing tests.
+- `npm run bench` measures JSON-RPC side-channel framing throughput. It is a microbenchmark, not an end-to-end latency claim.
+- `npm run bench:e2e` compares serial MCP SDK round-trip latency direct to a fixture server and through the proxy, reporting p50/p95/p99 and median overhead. Use production-like hardware, fixtures, transports, collector settings, and load before setting acceptance thresholds.
+
+GitHub Actions runs the checks, SDK-backed tests, dependency audit, and CycloneDX SBOM generation. Successful CI must be observed in the actual repository; a workflow file alone is not evidence that CI passed.
+
+## Windows dependency repair helper
+
+If you extracted an earlier bundle with the incompatible API pin, double-click `FIX_OTEL_DEPENDENCY.bat`. It repairs only that dependency entry and runs a normal `npm install`; it never disables peer-dependency checks. Then run `RUN_LOCAL_CHECKS.bat`.
+
+## Windows publishing helper
+
+`PUSH_TO_GITHUB.bat` checks Node, Git, and GitHub CLI; installs dependencies and generates the lockfile; runs checks/tests/audit and both benchmarks; generates an SBOM; then creates `mcp-inspector` in the authenticated GitHub account if it does not exist and pushes `main`. It asks whether the repository should be public or private when creating it. Inspect the generated SBOM and npm audit report before making the repository public.
+
+The script cannot override organization policies, billing restrictions, branch protection, or missing permissions. Review the remote carefully if a repository with this name already exists.
+
+## Design boundaries and roadmap
+
+MCP Inspector is a protocol-aware observer and test harness, not a replacement MCP router, authentication gateway, policy engine, or guarantee that tools are safe. It does not infer model reasoning from provider internals; it correlates protocol events with explicit external trace metadata when supplied. JSON-RPC byte forwarding is preserved, but observation still consumes CPU and memory; “zero-copy” applies to the forwarding path rather than the parser's side-channel memory.
+
+Before a stable 1.0 release, the project should add multi-version real-server test coverage, fuzz the proxy itself, test disconnect and cancellation behavior under load, validate HTTP Origin/Host policy for each deployment topology, establish stable latency/throughput budgets across CI hardware, publish signed release artifacts, and receive an independent security review.
+
+## License
+
+MIT. See [LICENSE](./LICENSE).
