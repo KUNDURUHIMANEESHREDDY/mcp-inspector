@@ -23,7 +23,7 @@ Usage:
   mcp-inspector workflow --file <workflow.json> [--execute --allow-side-effects] -- <server-command> [args...]
   mcp-inspector contract-diff --baseline <old.json> --current <new.json>
   mcp-inspector compat --transport stdio -- <server-command> [args...]
-  mcp-inspector compat --transport http --url <http-url>
+  mcp-inspector compat --transport http --url <http-url> [--oauth]
   mcp-inspector compat --transport both --url <http-url> -- <server-command> [args...]
   mcp-inspector dashboard --upstream <url> [--proxy-listen 127.0.0.1:9900] [--dashboard-listen 127.0.0.1:9911]
   mcp-inspector dashboard --stdio [--dashboard-listen 127.0.0.1:9911] -- <server-command> [args...]
@@ -45,6 +45,7 @@ Compatibility:
   compat is read-only. It initializes and lists tools; it never invokes server tools.
   Use --transport both to check stdio and Streamable HTTP in the same report.
   --timeout-ms accepts 100-120000; fuzz/workflow --max-duration-ms accepts 1000-900000.
+  --oauth uses the SDK OAuth 2.1/PKCE flow and a state-checked loopback callback; tokens are memory-only.
 
 Safety:
   Fuzzing is dry-run by default. Real tool calls require BOTH --execute and
@@ -304,7 +305,10 @@ async function commandWorkflow(args) {
   else if (report.limitReached || report.steps.some((step) => ['protocol_error', 'timeout', 'unknown_tool', 'skipped_invalid_arguments'].includes(step.outcome))) process.exitCode = 1;
 }
 async function commandCompatibility(args) {
-  const options = parseOptions(args, { value: ['transport', 'url', 'protocols', 'timeout-ms'] });
+  const options = parseOptions(args, {
+    boolean: ['oauth'],
+    value: ['transport', 'url', 'protocols', 'timeout-ms', 'oauth-timeout-ms'],
+  });
   const transport = options.transport ?? (options.url ? 'http' : 'stdio');
   if (!['stdio', 'http', 'both'].includes(transport)) throw new Error('--transport must be stdio, http, or both');
   const transports = transport === 'both' ? ['stdio', 'http'] : [transport];
@@ -313,12 +317,26 @@ async function commandCompatibility(args) {
   if (!transports.includes('stdio') && options.commandArgs.length) throw new Error('HTTP compatibility checks do not take a server command after --');
   const protocols = (options.protocols ?? 'legacy,auto,modern').split(',').map((item) => item.trim()).filter(Boolean);
   const { runCompatibilitySuite } = await import('./compatibility/suite.js');
-  const report = await runCompatibilitySuite({
-    transports, protocols, command: options.commandArgs[0], args: options.commandArgs.slice(1), url: options.url,
-    timeoutMs: parseBoundedInteger(options.timeoutMs, 15_000, 100, 120_000, '--timeout-ms'),
-  });
+  const controller = new AbortController();
+  const stop = () => controller.abort();
+  process.once('SIGINT', stop);
+  process.once('SIGTERM', stop);
+  let report;
+  try {
+    report = await runCompatibilitySuite({
+      transports, protocols, command: options.commandArgs[0], args: options.commandArgs.slice(1), url: options.url,
+      timeoutMs: parseBoundedInteger(options.timeoutMs, 15_000, 100, 120_000, '--timeout-ms'),
+      oauth: options.oauth === true,
+      oauthTimeoutMs: parseBoundedInteger(options.oauthTimeoutMs, 300_000, 30_000, 900_000, '--oauth-timeout-ms'),
+      signal: controller.signal,
+    });
+  } finally {
+    process.removeListener('SIGINT', stop);
+    process.removeListener('SIGTERM', stop);
+  }
   await printJson(report);
-  if (!report.summary.success) process.exitCode = 1;
+  if (report.cancelled || report.results.some((item) => item.status === 'cancelled')) process.exitCode = 130;
+  else if (!report.summary.success) process.exitCode = 1;
 }
 
 async function commandContractDiff(args) {

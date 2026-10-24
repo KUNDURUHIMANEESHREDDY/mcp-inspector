@@ -17,6 +17,7 @@ MCP Inspector is a local developer diagnostic tool and protocol observer. It is 
 - The HTTP proxy rejects embedded URL credentials, validates browser Origin/Host policy, strips hop-by-hop and connection-nominated headers, and applies request/header timeouts.
 - Upstream DNS lookups are checked at connection time to block private/reserved address resolution unless the exact hostname/IP is explicitly trusted; the checked IP is the IP the socket connects to, preventing a check-then-resolve DNS rebinding gap.
 - Optional upstream headers use a bounded JSON map with header-name/value validation; hop-by-hop/Host/Content-Length overrides are rejected, and bearer-token configuration cannot conflict with a custom Authorization value.
+- The compatibility CLI can use the MCP SDK OAuth 2.1 authorization-code/PKCE flow for HTTP probes, validates loopback callback Host and state, and stores tokens only in memory for the current run. It does not implement OAuth as a reverse-proxy gateway or persist refresh tokens.
 - Dashboard APIs are read-only; arbitrary process execution is not exposed over HTTP. Report imports are processed in the browser rather than uploaded to the dashboard.
 - Event recording uses an explicit field allowlist, bounds retained history, hashes string request identifiers, truncates untrusted strings, and removes common bearer/query-secret patterns.
 - Fuzz and workflow tool execution are dry-run by default. Execution requires both --execute and --allow-side-effects; execute only against servers you own or are authorized to test.
