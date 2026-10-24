@@ -144,9 +144,18 @@ function parseConfiguredUpstreamHeaders(raw, bearerToken) {
 }
 
 function hostHeaderHostname(value) {
-  if (typeof value !== 'string' || value.length > 512 || /[\r\n\s/@]/.test(value)) return '';
+  // Host is an authority, not a URL. Reject URL delimiters and malformed
+  // authority syntax before URL parsing so query/fragment text cannot be
+  // silently discarded while the parsed hostname still appears loopback.
+  if (typeof value !== 'string' || value.length > 512) return '';
+  const authority = /^(?:\[[0-9a-f:.]+\]|[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?\.?)((?::([0-9]{1,5}))?)$/i;
+  const match = authority.exec(value);
+  if (!match || /[\r\n\s/@?#%\\]/.test(value)) return '';
+  if (match[2] !== undefined && Number(match[2]) > 65535) return '';
   try {
-    return normalizeHostname(new URL(`http://${value}`).hostname);
+    const parsed = new URL(`http://${value}`);
+    if (parsed.username || parsed.password || parsed.pathname !== '/' || parsed.search || parsed.hash) return '';
+    return normalizeHostname(parsed.hostname);
   } catch {
     return '';
   }
