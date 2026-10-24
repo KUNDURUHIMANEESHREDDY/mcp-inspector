@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { getDashboardEvents, resetDashboardEventStore, publishDashboardEvent } from '../src/dashboard/event-store.js';
-
 test('untrusted event metadata is allowlisted, bounded, and secret-redacted', () => {
   resetDashboardEventStore();
   publishDashboardEvent({
@@ -57,8 +56,8 @@ test('stderr structured logs redact ID/session/private keys and common credentia
   }
   const output = chunks.join('');
   assert.doesNotMatch(output, /id-token-secret|session-id-secret|private-key-secret|query-id-secret|query-session-secret|sk-proj-1234567890|ghp_abcdefghijklmnopqrstuvwxyz|AKIAIOSFODNN7EXAMPLE/);
-  assert.match(output, /"id_token":"\\[REDACTED\\]"/);
-  assert.match(output, /"session_id":"\\[REDACTED\\]"/);
-  assert.match(output, /"private_key":"\\[REDACTED\\]"/);
-  assert.match(output, /id_token=\\[REDACTED\\]&session_id=\\[REDACTED\\]/);
+  assert.match(output, /"id_token":"\[REDACTED\]"/);
+  assert.match(output, /"session_id":"\[REDACTED\]"/);
+  assert.match(output, /"private_key":"\[REDACTED\]"/);
+  assert.match(output, /id_token=\[REDACTED\]&session_id=\[REDACTED\]/);
 });
