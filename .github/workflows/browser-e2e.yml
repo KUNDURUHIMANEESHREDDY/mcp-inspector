@@ -24,8 +24,8 @@ jobs:
         uses: actions/setup-node@v7.1.0
         with:
           node-version: '24'
-      - name: Install project dependencies
-        run: npm install --no-audit --no-fund
+      - name: Install locked project dependencies
+        run: npm ci --no-audit --no-fund
       - name: Install Playwright without changing project manifests
         run: npm install --no-save --no-package-lock playwright
       - name: Install Chromium
