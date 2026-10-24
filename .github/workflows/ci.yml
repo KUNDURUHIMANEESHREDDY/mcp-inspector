@@ -49,7 +49,7 @@ jobs:
         run: git archive --format=zip --prefix=mcp-inspector/ HEAD -o mcp-inspector-light-dashboard.zip
       - name: Upload packaged source archive
         if: matrix.node == '24'
-        uses: actions/upload-artifact@v6.0.0
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: mcp-inspector-light-dashboard
           path: mcp-inspector-light-dashboard.zip
@@ -57,7 +57,7 @@ jobs:
           retention-days: 30
       - name: Upload verification evidence
         if: matrix.node == '24'
-        uses: actions/upload-artifact@v6.0.0
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: mcp-inspector-verification-evidence
           path: |-
