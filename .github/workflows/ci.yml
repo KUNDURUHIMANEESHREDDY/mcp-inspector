@@ -44,6 +44,17 @@ jobs:
       - name: Generate CycloneDX SBOM
         if: matrix.node == '24'
         run: npm sbom --sbom-format=cyclonedx > mcp-inspector.cdx.json
+      - name: Package tested source archive
+        if: matrix.node == '24'
+        run: git archive --format=zip --prefix=mcp-inspector/ HEAD -o mcp-inspector-light-dashboard.zip
+      - name: Upload packaged source archive
+        if: matrix.node == '24'
+        uses: actions/upload-artifact@v6.0.0
+        with:
+          name: mcp-inspector-light-dashboard
+          path: mcp-inspector-light-dashboard.zip
+          if-no-files-found: error
+          retention-days: 30
       - name: Upload verification evidence
         if: matrix.node == '24'
         uses: actions/upload-artifact@v6.0.0
