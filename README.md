@@ -32,15 +32,17 @@ If an older extracted copy reports an OpenTelemetry `ERESOLVE` error, run `FIX_O
 - Git is only needed for contributing.
 - An OTLP/HTTP trace collector is optional.
 
-Install dependencies from a clone or extracted source directory:
+Install the reviewed dependency graph from a clone or extracted source directory:
 
 ```bash
-npm install
+npm ci
 npm run check
 npm test
 ```
 
-The OpenTelemetry SDK/exporter versions are pinned together at `0.223.0`; `@opentelemetry/api` is pinned to `1.9.1` because SDK `0.223.0` declares a peer range below `1.10.0`. Do not use `--force` or `--legacy-peer-deps` to bypass this compatibility check. The SDK-backed interoperability tests use the official MCP TypeScript SDK v2 and a small local fixture server. If dependency installation fails, those tests cannot execute; do not treat skipped tests as passing evidence. The repository includes `package-lock.json`. Keep it in sync whenever dependencies change; CI installs the declared dependency graph before running SDK-backed interoperability tests and dependency audits.
+Use `npm install` only when intentionally changing dependencies; review the resulting manifest and lockfile diff before committing.
+
+The OpenTelemetry SDK/exporter versions are pinned together at `0.223.0`; `@opentelemetry/api` is pinned to `1.9.1` because SDK `0.223.0` declares a peer range below `1.10.0`. Do not use `--force` or `--legacy-peer-deps` to bypass this compatibility check. The SDK-backed interoperability tests use the official MCP TypeScript SDK v2 and a small local fixture server. If dependency installation fails, those tests cannot execute; do not treat skipped tests as passing evidence. The repository includes `package-lock.json`. CI uses `npm ci` in the Node 22/24/26 matrix, the Windows Node 22 lane, and the browser E2E workflow so verification uses the reviewed dependency graph. The stable `required` job fails unless the full runtime matrix and Windows smoke lane pass. Keep the lockfile in sync when dependencies change; review the manifest/lockfile diff and audit output before proposing dependency updates.
 
 ## Quick start
 
