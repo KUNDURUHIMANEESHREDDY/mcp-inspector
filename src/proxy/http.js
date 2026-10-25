@@ -495,7 +495,8 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
   });
 
   server.requestTimeout = 300_000;
-  server.headersTimeout = 60_000;
+  // Keep incomplete request headers bounded when the proxy is explicitly exposed remotely.
+  server.headersTimeout = 15_000;
   server.keepAliveTimeout = 5_000;
   server.listen(listenPort, listenHost, () => {
     const address = server.address();
