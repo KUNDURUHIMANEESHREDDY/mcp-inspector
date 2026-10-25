@@ -117,7 +117,14 @@ function ipv6InRange(value, network, prefix) {
 
 function parseAllowedUpstreamHosts(raw) {
   const hosts = new Set();
-  for (const value of String(raw || '').split(',').map((entry) => entry.trim()).filter(Boolean)) {
+  const source = String(raw || '');
+  const entries = source.split(',');
+  // Treat a malformed allowlist as a configuration error instead of silently
+  // dropping empty entries and changing the operator's intended trust boundary.
+  if (source.trim() && entries.some((entry) => !entry.trim())) {
+    throw new Error('MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS must not contain empty entries');
+  }
+  for (const value of entries.map((entry) => entry.trim()).filter(Boolean)) {
     const host = normalizeHostname(value);
     const validIp = isIP(host) !== 0;
     const validDns = host.length <= 253 && /^[a-z0-9.-]+$/i.test(host) &&
