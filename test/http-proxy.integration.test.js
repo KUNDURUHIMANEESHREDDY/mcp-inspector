@@ -386,3 +386,14 @@ test('HTTP proxy rejects absolute-form and non-origin request targets before ups
   }
   assert.equal(upstreamCalls, 0, 'invalid request targets must never reach the configured upstream');
 });
+
+
+test('HTTP proxy bounds incomplete request-header time and keeps request-body timeout explicit', { skip: !startHttpProxy }, async (t) => {
+  const proxy = startHttpProxy({ upstream: 'http://127.0.0.1:3000', listen: '127.0.0.1:0' });
+  if (!proxy.server.listening) await once(proxy.server, 'listening');
+  t.after(() => proxy.close());
+
+  assert.equal(proxy.server.headersTimeout, 15_000);
+  assert.equal(proxy.server.requestTimeout, 300_000);
+  assert.equal(proxy.server.keepAliveTimeout, 5_000);
+});
