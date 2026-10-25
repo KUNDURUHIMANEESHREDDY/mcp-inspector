@@ -17,6 +17,7 @@ jobs:
   dashboard-browser:
     name: Chromium dashboard E2E / Node 24
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
