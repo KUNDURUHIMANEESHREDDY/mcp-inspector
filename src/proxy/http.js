@@ -272,8 +272,12 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
   if (!localOnly && !allowRemote) {
     throw new Error('Non-loopback binds require --allow-remote. Add an authenticated gateway before exposing this proxy.');
   }
-  const allowedOrigins = new Set(String(process.env.MCP_INSPECTOR_ALLOWED_ORIGINS || '')
-    .split(',').map((value) => value.trim()).filter(Boolean));
+  const rawAllowedOrigins = String(process.env.MCP_INSPECTOR_ALLOWED_ORIGINS || '');
+  const originEntries = rawAllowedOrigins.split(',').map((value) => value.trim());
+  if (rawAllowedOrigins.trim() && originEntries.some((value) => !value)) {
+    throw new Error('MCP_INSPECTOR_ALLOWED_ORIGINS must not contain empty entries');
+  }
+  const allowedOrigins = new Set(originEntries.filter(Boolean));
   for (const origin of allowedOrigins) {
     if (!originIsAllowed(origin, { localOnly: false, allowedOrigins: new Set([origin]) })) {
       throw new Error('MCP_INSPECTOR_ALLOWED_ORIGINS must contain canonical http:// or https:// origins without paths or credentials');
