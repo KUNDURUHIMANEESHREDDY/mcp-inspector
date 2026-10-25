@@ -174,6 +174,27 @@ test('HTTP proxy blocks cross-site browser Origins and spoofed Host headers befo
   assert.equal(upstreamCalls, 1);
 });
 
+test('HTTP proxy rejects empty entries in the browser Origin allowlist', { skip: !startHttpProxy }, () => {
+  const previous = process.env.MCP_INSPECTOR_ALLOWED_ORIGINS;
+  try {
+    for (const value of [
+      ',https://console.example',
+      'https://console.example,',
+      'https://console.example,,https://other.example',
+    ]) {
+      process.env.MCP_INSPECTOR_ALLOWED_ORIGINS = value;
+      assert.throws(
+        () => startHttpProxy({ upstream: 'http://127.0.0.1:3000' }),
+        /MCP_INSPECTOR_ALLOWED_ORIGINS must not contain empty entries/,
+        `reject malformed Origin allowlist: ${JSON.stringify(value)}`,
+      );
+    }
+  } finally {
+    if (previous === undefined) delete process.env.MCP_INSPECTOR_ALLOWED_ORIGINS;
+    else process.env.MCP_INSPECTOR_ALLOWED_ORIGINS = previous;
+  }
+});
+
 test('HTTP proxy enforces an explicit Origin allowlist and answers safe CORS preflights', { skip: !startHttpProxy }, async (t) => {
   let upstreamCalls = 0;
   const upstream = createServer(async (request, response) => {
