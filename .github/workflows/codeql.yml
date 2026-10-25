@@ -35,3 +35,25 @@ jobs:
         uses: github/codeql-action/analyze@v4.39.1
         with:
           category: '/language:${{ matrix.language }}'
+
+      # The GitHub PR alert check reports severity but its annotations are not
+      # always available to the connected review tooling. Emit minimal alert
+      # metadata to this job log so maintainers can triage the exact rule/path.
+      - name: Report open CodeQL alerts for this ref
+        if: always() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_REF: ${{ github.ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          alerts="$(gh api --paginate --jq '.[] | select(.tool.name == "CodeQL") | [.number, .rule.id, (.rule.security_severity_level // "unknown"), (.most_recent_instance.location.path // "unknown"), ((.most_recent_instance.location.start_line // 0) | tostring), (.rule.description // .rule.name // "No description")] | @tsv' \
+            -f state=open \
+            -f per_page=100 \
+            -f ref="$TARGET_REF" \
+            "repos/${GITHUB_REPOSITORY}/code-scanning/alerts")"
+          if [[ -n "$alerts" ]]; then
+            printf '%s\\n' "$alerts"
+          else
+            echo "No open CodeQL alerts returned for ref $TARGET_REF."
+          fi
