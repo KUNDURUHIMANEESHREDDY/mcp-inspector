@@ -284,17 +284,20 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
       outgoing.end();
       return;
     }
-    let target;
-    try {
-      target = new URL(incoming.url || '/', upstreamUrl.origin);
-    } catch {
-      outgoing.writeHead(400, { ...corsHeaders, 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
-      outgoing.end('Bad request URL');
-      return;
-    }
-    if (target.origin !== upstreamUrl.origin) {
-      outgoing.writeHead(400, { ...corsHeaders, 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
-      outgoing.end('Request target must remain on configured upstream origin');
+    // This is a reverse proxy for one configured upstream, not a forward
+    // proxy. Accept origin-form request targets only; never construct the
+    // outbound URL from a client-controlled absolute/network-path reference.
+    const targetPath = incoming.url || '/';
+    if (!targetPath.startsWith('/') || targetPath.startsWith('//') || /[\\#\u0000-\u001f\u007f]/.test(targetPath)) {
+      incoming.resume();
+      outgoing.writeHead(400, {
+        ...corsHeaders,
+        'content-type': 'text/plain; charset=utf-8',
+        'cache-control': 'no-store',
+        'content-length': '11',
+        'x-content-type-options': 'nosniff',
+      });
+      outgoing.end('Bad request');
       return;
     }
 
@@ -345,12 +348,12 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
 
     const headers = filterHopHeaders(incoming.headers);
     Object.assign(headers, configuredHeaders);
-    headers.host = target.host;
+    headers.host = upstreamUrl.host;
     headers.connection = 'keep-alive';
     const token = process.env.MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN;
     if (token) headers.authorization = `Bearer ${token}`;
-    const requestFn = target.protocol === 'https:' ? httpsRequest : httpRequest;
-    const upstreamReq = requestFn(target, { method: incoming.method, headers, lookup: safeUpstreamLookup }, (upstreamRes) => {
+    const requestFn = upstreamUrl.protocol === 'https:' ? httpsRequest : httpRequest;
+    const upstreamReq = requestFn(upstreamUrl, { method: incoming.method, path: targetPath, headers, lookup: safeUpstreamLookup }, (upstreamRes) => {
       const responseHeaders = filterHopHeaders(upstreamRes.headers);
       responseHeaders['cache-control'] = responseHeaders['cache-control'] || 'no-store';
       if (corsHeaders.vary) {
