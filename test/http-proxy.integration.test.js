@@ -256,10 +256,19 @@ test('HTTP proxy keeps established SSE responses alive beyond the ordinary inact
 
 test('upstream DNS address policy blocks private/reserved ranges unless explicitly trusted by hostname', { skip: !startHttpProxy }, async () => {
   const { isRestrictedUpstreamAddress } = await import('../src/proxy/http.js');
-  for (const address of ['127.0.0.1', '10.2.3.4', '169.254.4.2', '172.16.0.1', '192.168.1.4', '224.0.0.1', '::1', 'fc00::1', 'fe80::1', '::ffff:7f00:1']) {
+  for (const address of [
+    '127.0.0.1', '10.2.3.4', '169.254.4.2', '172.16.0.1', '192.168.1.4',
+    '224.0.0.1', '::1', 'fc00::1', 'fe80::1', '::ffff:7f00:1',
+    // Equivalent expanded forms must receive the same classification.
+    '0:0:0:0:0:ffff:7f00:1',
+    '2001:0db8:0000:0000:0000:0000:0000:0001',
+    '2001:0001:0000:0000:0000:0000:0000:0001',
+    '3fff:0000:0000:0000:0000:0000:0000:0001',
+    '2002:0808:0808:0000:0000:0000:0000:0001',
+  ]) {
     assert.equal(isRestrictedUpstreamAddress(address), true, 'restricted: ' + address);
   }
-  for (const address of ['8.8.8.8', '1.1.1.1', '2606:4700:4700::1111']) {
+  for (const address of ['8.8.8.8', '1.1.1.1', '2606:4700:4700::1111', '2606:4700:4700:0000:0000:0000:0000:1111']) {
     assert.equal(isRestrictedUpstreamAddress(address), false, 'public: ' + address);
   }
 });
