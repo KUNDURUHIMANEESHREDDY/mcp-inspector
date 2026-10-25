@@ -339,7 +339,7 @@ test('HTTP proxy rejects absolute-form and non-origin request targets before ups
   upstream.listen(0, '127.0.0.1');
   await once(upstream, 'listening');
   const upstreamAddress = upstream.address();
-  const proxy = startHttpProxy({ upstream: \`http://127.0.0.1:\${upstreamAddress.port}\`, listen: '127.0.0.1:0' });
+  const proxy = startHttpProxy({ upstream: 'http://127.0.0.1:' + upstreamAddress.port, listen: '127.0.0.1:0' });
   if (!proxy.server.listening) await once(proxy.server, 'listening');
   const proxyPort = proxy.server.address().port;
   t.after(async () => {
@@ -365,7 +365,7 @@ test('HTTP proxy rejects absolute-form and non-origin request targets before ups
     '/mcp#fragment',
   ]) {
     const response = await sendRawTarget(target);
-    assert.match(response, /^HTTP\\/1\\.1 400\\b/, \`invalid request target must be rejected: \${target}\`);
+    assert.ok(response.startsWith('HTTP/1.1 400'), 'invalid request target must be rejected: ' + target);
   }
   assert.equal(upstreamCalls, 0, 'invalid request targets must never reach the configured upstream');
 });
