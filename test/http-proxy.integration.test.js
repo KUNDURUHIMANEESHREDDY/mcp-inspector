@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, request as httpRequest } from 'node:http';
 import { once } from 'node:events';
+import { connect as netConnect } from 'node:net';
 let startHttpProxy;
 try {
   ({ startHttpProxy } = await import('../src/proxy/http.js'));
@@ -324,4 +325,47 @@ test('private literal upstreams require explicit exact-host allowlisting', { ski
     if (previous === undefined) delete process.env.MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS;
     else process.env.MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS = previous;
   }
+});
+
+
+test('HTTP proxy rejects absolute-form and non-origin request targets before upstream', { skip: !startHttpProxy }, async (t) => {
+  let upstreamCalls = 0;
+  const upstream = createServer(async (request, response) => {
+    upstreamCalls += 1;
+    request.resume();
+    response.writeHead(200, { 'content-type': 'text/plain' });
+    response.end('upstream reached');
+  });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  const upstreamAddress = upstream.address();
+  const proxy = startHttpProxy({ upstream: \`http://127.0.0.1:\${upstreamAddress.port}\`, listen: '127.0.0.1:0' });
+  if (!proxy.server.listening) await once(proxy.server, 'listening');
+  const proxyPort = proxy.server.address().port;
+  t.after(async () => {
+    await proxy.close();
+    await new Promise((resolve) => upstream.close(resolve));
+  });
+
+  const sendRawTarget = (target) => new Promise((resolve, reject) => {
+    const socket = netConnect(proxyPort, '127.0.0.1', () => {
+      socket.write('GET ' + target + ' HTTP/1.1\\r\\nHost: 127.0.0.1:' + proxyPort + '\\r\\nConnection: close\\r\\n\\r\\n');
+    });
+    let response = '';
+    socket.setEncoding('utf8');
+    socket.on('data', (chunk) => { response += chunk; });
+    socket.on('end', () => resolve(response));
+    socket.on('error', reject);
+  });
+
+  for (const target of [
+    'http://attacker.example/steal',
+    '//attacker.example/steal',
+    '/\\\\attacker.example/steal',
+    '/mcp#fragment',
+  ]) {
+    const response = await sendRawTarget(target);
+    assert.match(response, /^HTTP\\/1\\.1 400\\b/, \`invalid request target must be rejected: \${target}\`);
+  }
+  assert.equal(upstreamCalls, 0, 'invalid request targets must never reach the configured upstream');
 });
