@@ -50,6 +50,7 @@ jobs:
       - name: Report open CodeQL alert metadata
         env:
           GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ github.event.pull_request.head.sha }}
         shell: bash
         continue-on-error: true
         run: |
@@ -69,7 +70,7 @@ jobs:
           echo "::warning::Code-scanning alert API was unavailable; trying the CodeQL check annotations."
           check_id=""
           for attempt in {1..10}; do
-            check_id="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs" --jq '[.check_runs[] | select(.name == "CodeQL" and ((.output.title // "") | contains("alert")))] | last | .id // empty' 2>/dev/null || true)"
+            check_id="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${TARGET_SHA}/check-runs" --jq '[.check_runs[] | select(.name == "CodeQL" and ((.output.title // "") | contains("alert")))] | last | .id // empty' 2>/dev/null || true)"
             [[ -n "$check_id" ]] && break
             sleep 2
           done
