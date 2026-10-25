@@ -31,7 +31,7 @@ jobs:
       - name: Install pinned Playwright without changing project manifests
         run: npm install --no-save --no-package-lock playwright@1.64.1
       - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+        run: timeout 8m npx playwright install --with-deps chromium
       - name: Static checks
         run: npm run check
       - name: Run real browser test
