@@ -15,6 +15,29 @@ test('HTTP proxy stays loopback-only by default and rejects embedded credentials
   assert.throws(() => startHttpProxy({ upstream: 'http://127.0.0.1:3000', listen: '0.0.0.0:9900' }), /Non-loopback binds require --allow-remote/);
 });
 
+test('HTTP proxy rejects empty entries in the upstream host allowlist', { skip: !startHttpProxy }, () => {
+  const previous = process.env.MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS;
+  try {
+    for (const value of ['127.0.0.1,,example.com', ',example.com', 'example.com,', ' , ']) {
+      process.env.MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS = value;
+      assert.throws(
+        () => startHttpProxy({ upstream: 'http://127.0.0.1:3000' }),
+        /MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS must not contain empty entries/,
+        `reject malformed allowlist: ${JSON.stringify(value)}`,
+      );
+    }
+    process.env.MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS = '127.0.0.1,example.com';
+    assert.doesNotThrow(() => {
+      // Use the parser indirectly; the proxy is not started until listen() is called.
+      const proxy = startHttpProxy({ upstream: 'http://127.0.0.1:3000', listen: '127.0.0.1:0' });
+      proxy.close().catch(() => {});
+    });
+  } finally {
+    if (previous === undefined) delete process.env.MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS;
+    else process.env.MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS = previous;
+  }
+});
+
 test('HTTP proxy forwards JSON and strips connection-nominated hop-by-hop headers', { skip: !startHttpProxy }, async (t) => {
   let observedHeaders;
   const upstream = createServer(async (request, response) => {
