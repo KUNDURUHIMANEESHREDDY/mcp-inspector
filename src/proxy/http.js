@@ -50,29 +50,69 @@ export function isRestrictedUpstreamAddress(address) {
     return ranges.some(([network, prefix]) => inIpv4Range(clean, network, prefix));
   }
   if (family === 6) {
-    if (clean.startsWith('::ffff:')) {
-      const tail = clean.slice(7);
-      if (tail.includes('.')) return isRestrictedUpstreamAddress(tail);
-      const pieces = tail.split(':');
-      if (pieces.length >= 2) {
-        const first = Number.parseInt(pieces[pieces.length - 2], 16);
-        const last = Number.parseInt(pieces[pieces.length - 1], 16);
-        if (Number.isFinite(first) && Number.isFinite(last)) {
-          return isRestrictedUpstreamAddress([
-            (first >> 8) & 255, first & 255, (last >> 8) & 255, last & 255,
-          ].join('.'));
-        }
-      }
-      return true;
+    const value = ipv6ToBigInt(clean);
+    if (value === null) return true;
+
+    // IPv4-mapped IPv6 addresses must inherit the embedded IPv4 policy. This
+    // is representation-independent, so expanded forms cannot bypass checks.
+    if ((value >> 32n) === 0xffffn) {
+      const embedded = Number(value & 0xffffffffn);
+      return isRestrictedUpstreamAddress([
+        (embedded >>> 24) & 255,
+        (embedded >>> 16) & 255,
+        (embedded >>> 8) & 255,
+        embedded & 255,
+      ].join('.'));
     }
-    const first = Number.parseInt(clean.split(':')[0] || '0', 16);
-    if (clean === '::' || clean === '::1') return true;
-    if (clean.startsWith('fc') || clean.startsWith('fd') || /^fe[89ab]/.test(clean) || clean.startsWith('ff')) return true;
-    if (clean.startsWith('2001:db8:') || clean.startsWith('2001:0:') || clean.startsWith('2001:2:') ||
-        clean.startsWith('2001:10:') || clean.startsWith('2001:20:') || clean.startsWith('2002:')) return true;
-    return !Number.isFinite(first) || first < 0x2000 || first > 0x3fff;
+
+    // Only global-unicast IPv6 is eligible for implicit upstream access.
+    // Several special-use ranges sit inside 2000::/3, so the broad global
+    // prefix check is followed by explicit IANA special-use exclusions.
+    if (!ipv6InRange(value, '2000::', 3)) return true;
+    const specialUseRanges = [
+      ['2001::', 23],       // IETF protocol assignments
+      ['2001:db8::', 32],   // Documentation
+      ['2002::', 16],       // Deprecated 6to4
+      ['3fff::', 20],       // Documentation
+    ];
+    return specialUseRanges.some(([network, prefix]) => ipv6InRange(value, network, prefix));
   }
   return true;
+}
+
+
+function ipv6ToBigInt(address) {
+  let input = String(address || '').toLowerCase().split('%')[0];
+  if (isIP(input) !== 6) return null;
+
+  // Convert an IPv4 dotted tail into its two hexadecimal words before
+  // expanding ::, so mapped addresses share one canonical numeric path.
+  if (input.includes('.')) {
+    const splitAt = input.lastIndexOf(':');
+    const ipv4 = input.slice(splitAt + 1);
+    if (isIP(ipv4) !== 4) return null;
+    const octets = ipv4.split('.').map(Number);
+    const high = ((octets[0] << 8) | octets[1]).toString(16);
+    const low = ((octets[2] << 8) | octets[3]).toString(16);
+    input = input.slice(0, splitAt + 1) + high + ':' + low;
+  }
+
+  const halves = input.split('::');
+  if (halves.length > 2) return null;
+  const left = halves[0] ? halves[0].split(':') : [];
+  const right = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
+  const missing = 8 - left.length - right.length;
+  if ((halves.length === 1 && missing !== 0) || (halves.length === 2 && missing < 1)) return null;
+  const words = [...left, ...Array(missing).fill('0'), ...right].map((word) => Number.parseInt(word, 16));
+  if (words.length !== 8 || words.some((word) => !Number.isInteger(word) || word < 0 || word > 0xffff)) return null;
+  return words.reduce((result, word) => (result << 16n) | BigInt(word), 0n);
+}
+
+function ipv6InRange(value, network, prefix) {
+  const base = ipv6ToBigInt(network);
+  if (base === null) return true;
+  const shift = BigInt(128 - prefix);
+  return (value >> shift) === (base >> shift);
 }
 
 function parseAllowedUpstreamHosts(raw) {
