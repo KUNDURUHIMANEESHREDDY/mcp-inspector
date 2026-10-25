@@ -58,11 +58,11 @@ jobs:
             -f per_page=100 \
             "repos/${GITHUB_REPOSITORY}/code-scanning/alerts" 2>&1)"; then
             echo "::warning::Code-scanning alert metadata was not accessible to this workflow token."
-            printf '%s\\n' "$alerts"
+            printf '%s' "$alerts"
             exit 0
           fi
           if [[ -n "$alerts" ]]; then
-            printf '%s\\n' "$alerts"
+            printf '%s' "$alerts"
           else
             echo "No open CodeQL alerts returned by the API."
           fi
