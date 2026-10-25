@@ -322,7 +322,7 @@ test('upstream header config fails closed for unsafe or conflicting headers', { 
     delete process.env.MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN;
     process.env.MCP_INSPECTOR_UPSTREAM_HEADERS = JSON.stringify({ 'X-Api-Key': 'one', 'x-api-key': 'two' });
     assert.throws(() => startHttpProxy({ upstream: 'http://127.0.0.1:3000' }), /duplicate header names/);
-    process.env.MCP_INSPECTOR_UPSTREAM_HEADERS = JSON.stringify({ 'x-api-key': 'bad\\r\\nx-injected: yes' });
+    process.env.MCP_INSPECTOR_UPSTREAM_HEADERS = JSON.stringify({ 'x-api-key': 'bad\r\nx-injected: yes' });
     assert.throws(() => startHttpProxy({ upstream: 'http://127.0.0.1:3000' }), /without control line breaks/);
     process.env.MCP_INSPECTOR_UPSTREAM_HEADERS = JSON.stringify(
       Object.fromEntries(Array.from({ length: 33 }, (_, index) => [`x-header-${index}`, 'value'])),
