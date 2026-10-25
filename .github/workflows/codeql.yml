@@ -36,21 +36,33 @@ jobs:
         with:
           category: '/language:${{ matrix.language }}'
 
-      # The PR security check reports severity, but annotations may not be available
-      # to review tooling. Emit minimal metadata for open CodeQL alerts across refs.
+  report-open-alerts:
+    name: Report open CodeQL alert metadata
+    if: always() && github.event_name == 'pull_request'
+    needs: [analyze]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      security-events: read
+    steps:
       - name: Report open CodeQL alert metadata
-        if: always() && github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
+        continue-on-error: true
         run: |
           set -euo pipefail
-          alerts="$(gh api --paginate --jq '.[] | select(.tool.name == "CodeQL") | [.number, .rule.id, (.rule.security_severity_level // "unknown"), (.most_recent_instance.ref // "unknown"), (.most_recent_instance.location.path // "unknown"), ((.most_recent_instance.location.start_line // 0) | tostring), (.rule.description // .rule.name // "No description")] | @tsv' \
+          if ! alerts="$(gh api --paginate --jq '.[] | select(.tool.name == "CodeQL") | [.number, .rule.id, (.rule.security_severity_level // "unknown"), (.most_recent_instance.ref // "unknown"), (.most_recent_instance.location.path // "unknown"), ((.most_recent_instance.location.start_line // 0) | tostring), (.rule.description // .rule.name // "No description")] | @tsv' \
             -f state=open \
             -f per_page=100 \
-            "repos/${GITHUB_REPOSITORY}/code-scanning/alerts")"
+            "repos/${GITHUB_REPOSITORY}/code-scanning/alerts" 2>&1)"; then
+            echo "::warning::Code-scanning alert metadata was not accessible to this workflow token."
+            printf '%s\\n' "$alerts"
+            exit 0
+          fi
           if [[ -n "$alerts" ]]; then
-            printf '%s\n' "$alerts"
+            printf '%s\\n' "$alerts"
           else
             echo "No open CodeQL alerts returned by the API."
           fi
