@@ -330,7 +330,9 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
 
   const server = createServer((incoming, outgoing) => {
     const requestHostname = hostHeaderHostname(incoming.headers.host);
-    if (localOnly && (!requestHostname || !isLoopback(requestHostname))) {
+    // Validate the authority syntax for every bind. Loopback listeners additionally
+    // restrict it to loopback so DNS aliases cannot bypass the local-only boundary.
+    if (!requestHostname || (localOnly && !isLoopback(requestHostname))) {
       incoming.resume();
       rejectRequest(outgoing, 'invalid_host');
       return;
