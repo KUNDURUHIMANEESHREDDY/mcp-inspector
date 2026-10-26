@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto';
 import { createServer } from 'node:http';
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
@@ -237,6 +238,28 @@ function rejectRequest(outgoing, reason) {
   outgoing.end('Forbidden');
 }
 
+function rejectUnauthorized(outgoing) {
+  log('warn', 'http.request_rejected', { reason: 'proxy_auth_required' });
+  const body = 'Unauthorized';
+  outgoing.writeHead(401, {
+    'www-authenticate': 'Bearer realm="mcp-inspector"',
+    'content-type': 'text/plain; charset=utf-8',
+    'cache-control': 'no-store',
+    'content-length': Buffer.byteLength(body),
+    'x-content-type-options': 'nosniff',
+  });
+  outgoing.end(body);
+}
+
+function hasValidBearerToken(header, expected) {
+  if (typeof header !== 'string' || typeof expected !== 'string') return false;
+  const match = /^Bearer\\s+([A-Za-z0-9._~+\\/-]+=*)$/i.exec(header);
+  if (!match) return false;
+  const actual = Buffer.from(match[1], 'utf8');
+  const wanted = Buffer.from(expected, 'utf8');
+  return actual.length === wanted.length && timingSafeEqual(actual, wanted);
+}
+
 function inspectJsonBody(inspector, chunks, totalBytes, maxBytes) {
   if (totalBytes === 0) return;
   if (totalBytes > maxBytes) {
@@ -252,6 +275,7 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
   if (!upstream) throw new Error('--upstream is required for HTTP proxy mode');
   const upstreamUrl = new URL(upstream);
   const configuredToken = process.env.MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN;
+  const configuredProxyToken = process.env.MCP_INSPECTOR_PROXY_BEARER_TOKEN;
   if (configuredToken && !/^[A-Za-z0-9._~+\/-]+=*$/.test(configuredToken)) throw new Error('MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN contains unsupported header characters');
   if (configuredToken && upstreamUrl.protocol !== 'https:' && !isLoopback(upstreamUrl.hostname)) throw new Error('Bearer credentials require HTTPS for non-loopback upstreams');
   if (!['http:', 'https:'].includes(upstreamUrl.protocol)) throw new Error('Upstream must use http:// or https://');
@@ -281,6 +305,17 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
   for (const origin of allowedOrigins) {
     if (!originIsAllowed(origin, { localOnly: false, allowedOrigins: new Set([origin]) })) {
       throw new Error('MCP_INSPECTOR_ALLOWED_ORIGINS must contain canonical http:// or https:// origins without paths or credentials');
+    }
+  }
+  if (!localOnly) {
+    if (!configuredProxyToken || configuredProxyToken.length < 32) {
+      throw new Error('Non-loopback binds require MCP_INSPECTOR_PROXY_BEARER_TOKEN with at least 32 characters');
+    }
+    if (!/^[A-Za-z0-9._~+\\/-]+=*$/.test(configuredProxyToken)) {
+      throw new Error('MCP_INSPECTOR_PROXY_BEARER_TOKEN contains unsupported header characters');
+    }
+    if (allowedOrigins.size === 0) {
+      throw new Error('Non-loopback binds require MCP_INSPECTOR_ALLOWED_ORIGINS with at least one exact origin');
     }
   }
 
@@ -333,6 +368,11 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
         'cache-control': 'no-store',
       });
       outgoing.end();
+      return;
+    }
+    if (!localOnly && !hasValidBearerToken(incoming.headers.authorization, configuredProxyToken)) {
+      incoming.resume();
+      rejectUnauthorized(outgoing);
       return;
     }
     // This is a reverse proxy for one configured upstream, not a forward
@@ -398,6 +438,10 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
     if (sessionState) sessionState.flushPending = (reason) => egressInspector.flushPending(reason);
 
     const headers = filterHopHeaders(incoming.headers);
+    // In remote mode Authorization authenticates the client to this proxy; do
+    // not leak that credential to the upstream. Configure upstream credentials
+    // separately with MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN/UPSTREAM_HEADERS.
+    if (!localOnly) delete headers.authorization;
     Object.assign(headers, configuredHeaders);
     headers.host = upstreamUrl.host;
     headers.connection = 'keep-alive';
