@@ -36,7 +36,7 @@ Dashboard:
 Proxy options:
   --upstream <origin>          HTTP reverse proxy mode (e.g. http://127.0.0.1:3000)
   --listen <host:port>         HTTP listen endpoint; default 127.0.0.1:9900
-  --allow-remote               Permit a non-loopback HTTP listener (not recommended without a gateway)
+  --allow-remote               Permit a non-loopback listener only with proxy bearer token and Origin allowlist
   --contract-file <path>       Capture/diff tools/list schema in this file
   --contract-source <name>     Stable label for the server in contract reports
   --update-contract            Replace the stored baseline after a comparison
@@ -50,7 +50,7 @@ Compatibility:
 Safety:
   Fuzzing is dry-run by default. Real tool calls require BOTH --execute and
   --allow-side-effects. Tool calls can mutate files or invoke external systems.
-  HTTP proxy mode binds to loopback unless --allow-remote is explicitly set.
+  Remote HTTP binds also require MCP_INSPECTOR_PROXY_BEARER_TOKEN (32+ chars) and MCP_INSPECTOR_ALLOWED_ORIGINS.
   Logs contain metadata only; request arguments and tool results are not logged.
 
 Protocol modes:
