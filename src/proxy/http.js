@@ -311,7 +311,7 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
     if (!configuredProxyToken || configuredProxyToken.length < 32) {
       throw new Error('Non-loopback binds require MCP_INSPECTOR_PROXY_BEARER_TOKEN with at least 32 characters');
     }
-    if (!/^[A-Za-z0-9._~+\\/-]+=*$/.test(configuredProxyToken)) {
+    if (!/^[A-Za-z0-9._~+\/-]+=*$/.test(configuredProxyToken)) {
       throw new Error('MCP_INSPECTOR_PROXY_BEARER_TOKEN contains unsupported header characters');
     }
     if (allowedOrigins.size === 0) {
