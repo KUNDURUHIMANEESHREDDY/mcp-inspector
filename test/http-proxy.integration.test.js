@@ -588,6 +588,53 @@ test('HTTP proxy rejects absolute-form and non-origin request targets before ups
 });
 
 
+test('HTTP proxy rejects duplicate Host headers before contacting upstream', { skip: !startHttpProxy }, async (t) => {
+  let upstreamCalls = 0;
+  const upstream = createServer(async (request, response) => {
+    upstreamCalls += 1;
+    request.resume();
+    response.writeHead(200, { 'content-type': 'text/plain' });
+    response.end('upstream reached');
+  });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  const upstreamAddress = upstream.address();
+  const proxy = startHttpProxy({
+    upstream: 'http://127.0.0.1:' + upstreamAddress.port,
+    listen: '127.0.0.1:0',
+  });
+  if (!proxy.server.listening) await once(proxy.server, 'listening');
+  const proxyPort = proxy.server.address().port;
+  t.after(async () => {
+    await proxy.close();
+    await new Promise((resolve) => upstream.close(resolve));
+  });
+
+  const body = '{"jsonrpc":"2.0","id":71,"method":"ping"}';
+  const rawRequest = [
+    'POST /mcp HTTP/1.1',
+    'Host: 127.0.0.1:' + proxyPort,
+    'Host: localhost:' + proxyPort,
+    'Content-Type: application/json',
+    'Content-Length: ' + Buffer.byteLength(body),
+    'Connection: close',
+    '',
+    body,
+  ].join('\\r\\n');
+
+  const response = await new Promise((resolve, reject) => {
+    const socket = netConnect(proxyPort, '127.0.0.1', () => socket.write(rawRequest));
+    let received = '';
+    socket.setEncoding('utf8');
+    socket.on('data', (chunk) => { received += chunk; });
+    socket.on('end', () => resolve(received));
+    socket.on('error', reject);
+  });
+
+  assert.match(response, /^HTTP\\/1\\.1 4(?:00|03)\\b/, 'duplicate Host must be rejected with a client error');
+  assert.equal(upstreamCalls, 0, 'duplicate Host must never reach the configured upstream');
+});
+
 test('HTTP proxy bounds incomplete request-header time and keeps request-body timeout explicit', { skip: !startHttpProxy }, async (t) => {
   const proxy = startHttpProxy({ upstream: 'http://127.0.0.1:3000', listen: '127.0.0.1:0' });
   if (!proxy.server.listening) await once(proxy.server, 'listening');
