@@ -191,19 +191,9 @@ function parseConfiguredUpstreamHeaders(raw, bearerToken) {
 }
 
 function hostHeaderHostname(value) {
-  // Host is an authority, not a URL. Reject path/query/fragment/escape syntax
-  // before URL parsing so values such as "127.0.0.1:9900?x" cannot be treated
-  // as a canonical loopback Host header.
-  if (typeof value !== 'string' || value.length > 512 ||
-      !/^[A-Za-z0-9.\[\]:-]+$/.test(value)) return '';
-  try {
-    const parsed = new URL(`http://${value}`);
-    if (parsed.username || parsed.password || parsed.pathname !== '/' ||
-        parsed.search || parsed.hash) return '';
-    return normalizeHostname(parsed.hostname);
   // Host is an authority, not a URL. Reject URL delimiters and malformed
-  // authority syntax before URL parsing so query/fragment text cannot be
-  // silently discarded while the parsed hostname still appears loopback.
+  // authority syntax before parsing so query/fragment text cannot be silently
+  // discarded while the parsed hostname still appears to be loopback.
   if (typeof value !== 'string' || value.length > 512) return '';
   const authority = /^(?:\[[0-9a-f:.]+\]|[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?\.?)((?::([0-9]{1,5}))?)$/i;
   const match = authority.exec(value);
@@ -211,7 +201,8 @@ function hostHeaderHostname(value) {
   if (match[2] !== undefined && Number(match[2]) > 65535) return '';
   try {
     const parsed = new URL(`http://${value}`);
-    if (parsed.username || parsed.password || parsed.pathname !== '/' || parsed.search || parsed.hash) return '';
+    if (parsed.username || parsed.password || parsed.pathname !== '/' ||
+        parsed.search || parsed.hash) return '';
     const hostname = normalizeHostname(parsed.hostname);
     // WHATWG URL parsing normalizes legacy IPv4 forms such as 127.1 and
     // 0x7f000001 to 127.0.0.1. Do not let a non-IP spelling become a
