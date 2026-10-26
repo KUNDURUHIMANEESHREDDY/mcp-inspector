@@ -122,6 +122,19 @@ test('HTTP proxy authenticates remote clients without forwarding the proxy crede
     assert.equal(malformedHost.status, 403);
     assert.equal(upstreamCalls, 0, 'malformed Host authority must be rejected before contacting upstream');
 
+    for (const invalidDnsHost of [
+      'bad..example',
+      'bad-.example',
+      'bad.-example',
+      `${'a'.repeat(64)}.example`,
+    ]) {
+      const rejected = await send({
+        headers: { authorization: 'Bearer ' + proxyToken, host: invalidDnsHost },
+      });
+      assert.equal(rejected.status, 403, `invalid DNS Host must be rejected: ${invalidDnsHost}`);
+      assert.equal(upstreamCalls, 0, 'invalid DNS authorities must never reach upstream');
+    }
+
     const preflight = await send({
       method: 'OPTIONS',
       headers: {
