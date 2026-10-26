@@ -12,8 +12,9 @@ test('string JSON-RPC ids are correlated without logging the raw identifier', ()
 });
 
 test('log string sanitization redacts bearer credentials and URL secrets', () => {
-  const safe = safeString('Authorization: Bearer abc123 and https://example.test/?access_token=secret');
+  const safe = safeString('Authorization: Bearer abc123 and https://example.test/?access_token=secret github_pat_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKL');
   assert.ok(!safe.includes('abc123'));
   assert.ok(!safe.includes('secret'));
+  assert.ok(!safe.includes('github_pat_'));
   assert.match(safe, /REDACTED/);
 });
