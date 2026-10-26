@@ -1,6 +1,8 @@
 import { createServer } from 'node:http';
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
+import { lookup as dnsLookup } from 'node:dns';
+import { isIP } from 'node:net';
 import { MessageInspector } from '../protocol/inspector.js';
 import { ContractRecorder } from '../contracts/contract.js';
 import { SseObserver } from '../protocol/sse-parser.js';
@@ -27,6 +29,167 @@ function isLoopback(host) {
   return ['127.0.0.1', '::1', 'localhost'].includes(normalizeHostname(host));
 }
 
+function inIpv4Range(address, network, prefix) {
+  const value = address.split('.').reduce((acc, part) => ((acc * 256) + Number(part)) >>> 0, 0);
+  const base = network.split('.').reduce((acc, part) => ((acc * 256) + Number(part)) >>> 0, 0);
+  const mask = (0xffffffff << (32 - prefix)) >>> 0;
+  return (value & mask) >>> 0 === (base & mask) >>> 0;
+}
+
+/** True for special-use / private addresses which must not be targeted implicitly. */
+export function isRestrictedUpstreamAddress(address) {
+  const clean = String(address || '').toLowerCase().replace(/^\[|\]$/g, '').split('%')[0];
+  const family = isIP(clean);
+  if (family === 4) {
+    const ranges = [
+      ['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8],
+      ['169.254.0.0', 16], ['172.16.0.0', 12], ['192.0.0.0', 24], ['192.0.2.0', 24],
+      ['192.88.99.0', 24], ['192.168.0.0', 16], ['198.18.0.0', 15],
+      ['198.51.100.0', 24], ['203.0.113.0', 24], ['224.0.0.0', 4], ['240.0.0.0', 4],
+    ];
+    return ranges.some(([network, prefix]) => inIpv4Range(clean, network, prefix));
+  }
+  if (family === 6) {
+    const value = ipv6ToBigInt(clean);
+    if (value === null) return true;
+
+    // IPv4-mapped IPv6 addresses must inherit the embedded IPv4 policy. This
+    // is representation-independent, so expanded forms cannot bypass checks.
+    if ((value >> 32n) === 0xffffn) {
+      const embedded = Number(value & 0xffffffffn);
+      return isRestrictedUpstreamAddress([
+        (embedded >>> 24) & 255,
+        (embedded >>> 16) & 255,
+        (embedded >>> 8) & 255,
+        embedded & 255,
+      ].join('.'));
+    }
+
+    // Only global-unicast IPv6 is eligible for implicit upstream access.
+    // Several special-use ranges sit inside 2000::/3, so the broad global
+    // prefix check is followed by explicit IANA special-use exclusions.
+    if (!ipv6InRange(value, '2000::', 3)) return true;
+    const specialUseRanges = [
+      ['2001::', 23],       // IETF protocol assignments
+      ['2001:db8::', 32],   // Documentation
+      ['2002::', 16],       // Deprecated 6to4
+      ['3fff::', 20],       // Documentation
+    ];
+    return specialUseRanges.some(([network, prefix]) => ipv6InRange(value, network, prefix));
+  }
+  return true;
+}
+
+
+function ipv6ToBigInt(address) {
+  let input = String(address || '').toLowerCase().split('%')[0];
+  if (isIP(input) !== 6) return null;
+
+  // Convert an IPv4 dotted tail into its two hexadecimal words before
+  // expanding ::, so mapped addresses share one canonical numeric path.
+  if (input.includes('.')) {
+    const splitAt = input.lastIndexOf(':');
+    const ipv4 = input.slice(splitAt + 1);
+    if (isIP(ipv4) !== 4) return null;
+    const octets = ipv4.split('.').map(Number);
+    const high = ((octets[0] << 8) | octets[1]).toString(16);
+    const low = ((octets[2] << 8) | octets[3]).toString(16);
+    input = input.slice(0, splitAt + 1) + high + ':' + low;
+  }
+
+  const halves = input.split('::');
+  if (halves.length > 2) return null;
+  const left = halves[0] ? halves[0].split(':') : [];
+  const right = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
+  const missing = 8 - left.length - right.length;
+  if ((halves.length === 1 && missing !== 0) || (halves.length === 2 && missing < 1)) return null;
+  const words = [...left, ...Array(missing).fill('0'), ...right].map((word) => Number.parseInt(word, 16));
+  if (words.length !== 8 || words.some((word) => !Number.isInteger(word) || word < 0 || word > 0xffff)) return null;
+  return words.reduce((result, word) => (result << 16n) | BigInt(word), 0n);
+}
+
+function ipv6InRange(value, network, prefix) {
+  const base = ipv6ToBigInt(network);
+  if (base === null) return true;
+  const shift = BigInt(128 - prefix);
+  return (value >> shift) === (base >> shift);
+}
+
+function parseAllowedUpstreamHosts(raw) {
+  const hosts = new Set();
+  const source = String(raw || '');
+  const entries = source.split(',');
+  // Treat a malformed allowlist as a configuration error instead of silently
+  // dropping empty entries and changing the operator's intended trust boundary.
+  if (source.trim() && entries.some((entry) => !entry.trim())) {
+    throw new Error('MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS must not contain empty entries');
+  }
+  for (const value of entries.map((entry) => entry.trim()).filter(Boolean)) {
+    const host = normalizeHostname(value);
+    const validIp = isIP(host) !== 0;
+    const validDns = host.length <= 253 && /^[a-z0-9.-]+$/i.test(host) &&
+      !host.startsWith('.') && !host.endsWith('.') &&
+      host.split('.').every((label) => label.length > 0 && label.length <= 63 && !label.startsWith('-') && !label.endsWith('-'));
+    if (!validIp && !validDns) {
+      throw new Error('MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS must be a comma-separated exact hostname/IP allowlist without ports or wildcards');
+    }
+    hosts.add(host);
+  }
+  return hosts;
+}
+
+function createSafeUpstreamLookup(allowedHosts) {
+  return (hostname, options, callback) => {
+    const lookupOptions = typeof options === 'object' && options !== null ? options : {};
+    const done = typeof options === 'function' ? options : callback;
+    dnsLookup(hostname, { all: true, verbatim: true }, (error, addresses) => {
+      if (error) return done(error);
+      if (!Array.isArray(addresses) || addresses.length === 0) return done(new Error('Upstream host did not resolve'));
+      const normalized = normalizeHostname(hostname);
+      const explicitlyTrusted = isLoopback(normalized) || allowedHosts.has(normalized);
+      if (!explicitlyTrusted && addresses.some((item) => isRestrictedUpstreamAddress(item.address))) {
+        const blocked = new Error('Upstream hostname resolved to a private or special-use address; add its exact hostname to MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS only if trusted');
+        blocked.code = 'ERR_MCP_INSPECTOR_UPSTREAM_ADDRESS_BLOCKED';
+        return done(blocked);
+      }
+      const matchingFamily = lookupOptions.family
+        ? addresses.filter((item) => item.family === lookupOptions.family)
+        : addresses;
+      if (matchingFamily.length === 0) return done(new Error('No upstream address matches the requested address family'));
+      if (lookupOptions.all) return done(null, matchingFamily);
+      return done(null, matchingFamily[0].address, matchingFamily[0].family);
+    });
+  };
+}
+
+function parseConfiguredUpstreamHeaders(raw, bearerToken) {
+  if (!raw) return {};
+  if (raw.length > 8192) throw new Error('MCP_INSPECTOR_UPSTREAM_HEADERS exceeds the 8 KiB configuration limit');
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch { throw new Error('MCP_INSPECTOR_UPSTREAM_HEADERS must be a JSON object of header names to string values'); }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('MCP_INSPECTOR_UPSTREAM_HEADERS must be a JSON object of header names to string values');
+  }
+  const result = {};
+  const seen = new Set();
+  const forbidden = new Set([...HOP_BY_HOP, 'host', 'content-length', 'proxy-authorization', 'proxy-authenticate']);
+  const entries = Object.entries(parsed);
+  if (entries.length > 32) throw new Error('MCP_INSPECTOR_UPSTREAM_HEADERS supports at most 32 headers');
+  for (const [name, value] of entries) {
+    if (!/^[A-Za-z0-9!#$%&'*+.^_|~-]+$/.test(name)) throw new Error('MCP_INSPECTOR_UPSTREAM_HEADERS contains an invalid header name');
+    const key = name.toLowerCase();
+    if (seen.has(key)) throw new Error('MCP_INSPECTOR_UPSTREAM_HEADERS contains duplicate header names');
+    seen.add(key);
+    if (forbidden.has(key)) throw new Error('MCP_INSPECTOR_UPSTREAM_HEADERS cannot override hop-by-hop, host, or content-length headers');
+    if (key === 'authorization' && bearerToken) throw new Error('Set either MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN or an authorization header, not both');
+    if (typeof value !== 'string' || value.length > 4096 || /[\r\n\u0000]/.test(value)) {
+      throw new Error('MCP_INSPECTOR_UPSTREAM_HEADERS values must be strings up to 4096 characters without control line breaks');
+    }
+    result[key] = value;
+  }
+  return result;
+}
+
 function hostHeaderHostname(value) {
   // Host is an authority, not a URL. Reject path/query/fragment/escape syntax
   // before URL parsing so values such as "127.0.0.1:9900?x" cannot be treated
@@ -38,6 +201,27 @@ function hostHeaderHostname(value) {
     if (parsed.username || parsed.password || parsed.pathname !== '/' ||
         parsed.search || parsed.hash) return '';
     return normalizeHostname(parsed.hostname);
+  // Host is an authority, not a URL. Reject URL delimiters and malformed
+  // authority syntax before URL parsing so query/fragment text cannot be
+  // silently discarded while the parsed hostname still appears loopback.
+  if (typeof value !== 'string' || value.length > 512) return '';
+  const authority = /^(?:\[[0-9a-f:.]+\]|[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?\.?)((?::([0-9]{1,5}))?)$/i;
+  const match = authority.exec(value);
+  if (!match || /[\r\n\s/@?#%\\]/.test(value)) return '';
+  if (match[2] !== undefined && Number(match[2]) > 65535) return '';
+  try {
+    const parsed = new URL(`http://${value}`);
+    if (parsed.username || parsed.password || parsed.pathname !== '/' || parsed.search || parsed.hash) return '';
+    const hostname = normalizeHostname(parsed.hostname);
+    // WHATWG URL parsing normalizes legacy IPv4 forms such as 127.1 and
+    // 0x7f000001 to 127.0.0.1. Do not let a non-IP spelling become a
+    // loopback IP after parsing.
+    const closeBracket = value.startsWith('[') ? value.indexOf(']') : -1;
+    const rawHostname = closeBracket >= 0
+      ? value.slice(1, closeBracket)
+      : value.split(':')[0];
+    if (isIP(rawHostname) === 0 && isIP(hostname) !== 0) return '';
+    return hostname;
   } catch {
     return '';
   }
@@ -82,6 +266,14 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
   if (configuredToken && upstreamUrl.protocol !== 'https:' && !isLoopback(upstreamUrl.hostname)) throw new Error('Bearer credentials require HTTPS for non-loopback upstreams');
   if (!['http:', 'https:'].includes(upstreamUrl.protocol)) throw new Error('Upstream must use http:// or https://');
   if (upstreamUrl.username || upstreamUrl.password) throw new Error('Credentials in upstream URLs are not allowed; use environment variables');
+  const allowedUpstreamHosts = parseAllowedUpstreamHosts(process.env.MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS);
+  const safeUpstreamLookup = createSafeUpstreamLookup(allowedUpstreamHosts);
+  const configuredHeaders = parseConfiguredUpstreamHeaders(process.env.MCP_INSPECTOR_UPSTREAM_HEADERS || '', configuredToken);
+  const configuredHostname = normalizeHostname(upstreamUrl.hostname);
+  if (!isLoopback(configuredHostname) && !allowedUpstreamHosts.has(configuredHostname) &&
+      isIP(configuredHostname) !== 0 && isRestrictedUpstreamAddress(configuredHostname)) {
+    throw new Error('Private or special-use IP upstreams require an exact entry in MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS');
+  }
   const [listenHostRaw, listenPortRaw] = splitListen(listen);
   const listenHost = listenHostRaw || '127.0.0.1';
   const listenPort = Number(listenPortRaw || 9900);
@@ -90,8 +282,12 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
   if (!localOnly && !allowRemote) {
     throw new Error('Non-loopback binds require --allow-remote. Add an authenticated gateway before exposing this proxy.');
   }
-  const allowedOrigins = new Set(String(process.env.MCP_INSPECTOR_ALLOWED_ORIGINS || '')
-    .split(',').map((value) => value.trim()).filter(Boolean));
+  const rawAllowedOrigins = String(process.env.MCP_INSPECTOR_ALLOWED_ORIGINS || '');
+  const originEntries = rawAllowedOrigins.split(',').map((value) => value.trim());
+  if (rawAllowedOrigins.trim() && originEntries.some((value) => !value)) {
+    throw new Error('MCP_INSPECTOR_ALLOWED_ORIGINS must not contain empty entries');
+  }
+  const allowedOrigins = new Set(originEntries.filter(Boolean));
   for (const origin of allowedOrigins) {
     if (!originIsAllowed(origin, { localOnly: false, allowedOrigins: new Set([origin]) })) {
       throw new Error('MCP_INSPECTOR_ALLOWED_ORIGINS must contain canonical http:// or https:// origins without paths or credentials');
@@ -149,17 +345,20 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
       outgoing.end();
       return;
     }
-    let target;
-    try {
-      target = new URL(incoming.url || '/', upstreamUrl.origin);
-    } catch {
-      outgoing.writeHead(400, { ...corsHeaders, 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
-      outgoing.end('Bad request URL');
-      return;
-    }
-    if (target.origin !== upstreamUrl.origin) {
-      outgoing.writeHead(400, { ...corsHeaders, 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
-      outgoing.end('Request target must remain on configured upstream origin');
+    // This is a reverse proxy for one configured upstream, not a forward
+    // proxy. Accept origin-form request targets only; never construct the
+    // outbound URL from a client-controlled absolute/network-path reference.
+    const targetPath = incoming.url || '/';
+    if (!targetPath.startsWith('/') || targetPath.startsWith('//') || /[\\#\u0000-\u001f\u007f]/.test(targetPath)) {
+      incoming.resume();
+      outgoing.writeHead(400, {
+        ...corsHeaders,
+        'content-type': 'text/plain; charset=utf-8',
+        'cache-control': 'no-store',
+        'content-length': '11',
+        'x-content-type-options': 'nosniff',
+      });
+      outgoing.end('Bad request');
       return;
     }
 
@@ -209,12 +408,13 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
     if (sessionState) sessionState.flushPending = (reason) => egressInspector.flushPending(reason);
 
     const headers = filterHopHeaders(incoming.headers);
-    headers.host = target.host;
+    Object.assign(headers, configuredHeaders);
+    headers.host = upstreamUrl.host;
     headers.connection = 'keep-alive';
     const token = process.env.MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN;
     if (token) headers.authorization = `Bearer ${token}`;
-    const requestFn = target.protocol === 'https:' ? httpsRequest : httpRequest;
-    const upstreamReq = requestFn(target, { method: incoming.method, headers }, (upstreamRes) => {
+    const requestFn = upstreamUrl.protocol === 'https:' ? httpsRequest : httpRequest;
+    const upstreamReq = requestFn(upstreamUrl, { method: incoming.method, path: targetPath, headers, lookup: safeUpstreamLookup }, (upstreamRes) => {
       const responseHeaders = filterHopHeaders(upstreamRes.headers);
       responseHeaders['cache-control'] = responseHeaders['cache-control'] || 'no-store';
       if (corsHeaders.vary) {
@@ -316,7 +516,8 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
   });
 
   server.requestTimeout = 300_000;
-  server.headersTimeout = 60_000;
+  // Keep incomplete request headers bounded when the proxy is explicitly exposed remotely.
+  server.headersTimeout = 15_000;
   server.keepAliveTimeout = 5_000;
   server.listen(listenPort, listenHost, () => {
     const address = server.address();
