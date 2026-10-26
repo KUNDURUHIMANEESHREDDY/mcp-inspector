@@ -212,6 +212,15 @@ function hostHeaderHostname(value) {
       ? value.slice(1, closeBracket)
       : value.split(':')[0];
     if (isIP(rawHostname) === 0 && isIP(hostname) !== 0) return '';
+    // URL parsing is intentionally permissive about DNS labels. Validate the
+    // raw authority's DNS spelling so empty/overlong labels and leading or
+    // trailing hyphens cannot pass as a syntactically valid Host header.
+    if (closeBracket < 0 && isIP(rawHostname) !== 4) {
+      const dnsHostname = rawHostname.endsWith('.') ? rawHostname.slice(0, -1) : rawHostname;
+      if (dnsHostname.length > 253 || dnsHostname.split('.').some((label) =>
+        label.length === 0 || label.length > 63 ||
+        !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i.test(label))) return '';
+    }
     return hostname;
   } catch {
     return '';
