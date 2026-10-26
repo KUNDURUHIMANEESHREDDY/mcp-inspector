@@ -113,6 +113,15 @@ test('HTTP proxy authenticates remote clients without forwarding the proxy crede
     assert.equal(wrong.status, 401);
     assert.equal(upstreamCalls, 0);
 
+    const malformedHost = await send({
+      headers: {
+        authorization: 'Bearer ' + proxyToken,
+        host: 'example.com/path',
+      },
+    });
+    assert.equal(malformedHost.status, 403);
+    assert.equal(upstreamCalls, 0, 'malformed Host authority must be rejected before contacting upstream');
+
     const preflight = await send({
       method: 'OPTIONS',
       headers: {
