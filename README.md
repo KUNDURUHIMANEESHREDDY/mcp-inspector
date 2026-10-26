@@ -70,6 +70,20 @@ For a private upstream, set `MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN` in the process
 
 **Do not add `--allow-remote` unless you have placed a TLS-terminating, rate-limiting gateway in front of the proxy.** Non-loopback binding now also requires `MCP_INSPECTOR_PROXY_BEARER_TOKEN` (at least 32 characters) and a non-empty `MCP_INSPECTOR_ALLOWED_ORIGINS` list. The shared bearer token authenticates clients to this proxy but is not per-user authorization and does not provide TLS or rate limits.
 
+Generate a random token rather than inventing a memorable string. In Bash, this sets the variable without printing the generated value:
+
+```bash
+export MCP_INSPECTOR_PROXY_BEARER_TOKEN="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64url"))')"
+```
+
+In PowerShell:
+
+```powershell
+$env:MCP_INSPECTOR_PROXY_BEARER_TOKEN = node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64url'))"
+```
+
+In deployment, inject the token from your secret manager. Do not commit it, put it in a URL, or pass it as a command-line argument where it may appear in process listings.
+
 ### 3. Capture a tool contract
 
 ```bash
