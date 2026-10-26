@@ -338,10 +338,14 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
     : 16 * 1024 * 1024;
 
   const server = createServer((incoming, outgoing) => {
+    const hostHeaderCount = incoming.rawHeaders.reduce((count, name, index) =>
+      index % 2 === 0 && name.toLowerCase() === 'host' ? count + 1 : count, 0);
     const requestHostname = hostHeaderHostname(incoming.headers.host);
-    // Validate the authority syntax for every bind. Loopback listeners additionally
-    // restrict it to loopback so DNS aliases cannot bypass the local-only boundary.
-    if (!requestHostname || (localOnly && !isLoopback(requestHostname))) {
+    // HTTP/1.1 requests must have exactly one Host field. Reject duplicate
+    // authorities instead of relying on parser-specific duplicate-header policy.
+    // Loopback listeners also restrict the authority to loopback so DNS aliases
+    // cannot bypass the local-only boundary.
+    if (hostHeaderCount !== 1 || !requestHostname || (localOnly && !isLoopback(requestHostname))) {
       incoming.resume();
       rejectRequest(outgoing, 'invalid_host');
       return;
