@@ -253,7 +253,7 @@ function rejectUnauthorized(outgoing) {
 
 function hasValidBearerToken(header, expected) {
   if (typeof header !== 'string' || typeof expected !== 'string') return false;
-  const match = /^Bearer\\s+([A-Za-z0-9._~+\\/-]+=*)$/i.exec(header);
+  const match = /^Bearer ([A-Za-z0-9._~+\/-]+=*)$/i.exec(header);
   if (!match) return false;
   const actual = Buffer.from(match[1], 'utf8');
   const wanted = Buffer.from(expected, 'utf8');
