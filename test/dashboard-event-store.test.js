@@ -30,14 +30,14 @@ test('dashboard event text redacts token query parameters and common API key for
     event: 'rpc.failure',
     level: 'warn',
     reason: 'request failed?access_token=access-secret&refresh_token=refresh-secret',
-    error_type: 'keys sk-proj-1234567890abcdefghijklmnop ghp_abcdefghijklmnopqrstuvwxyz0123456789 AKIAIOSFODNN7EXAMPLE',
+    error_type: 'keys sk-proj-1234567890abcdefghijklmnop ghp_abcdefghijklmnopqrstuvwxyz0123456789 github_pat_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKL AKIAIOSFODNN7EXAMPLE',
   });
   const [item] = getDashboardEvents({ limit: 10 });
   assert.doesNotMatch(item.reason, /access-secret|refresh-secret/);
   assert.match(item.reason, /access_token=\[REDACTED\]/);
   assert.match(item.reason, /refresh_token=\[REDACTED\]/);
-  assert.doesNotMatch(item.error_type, /sk-proj-|ghp_|AKIAIOSFODNN7EXAMPLE/);
-  assert.equal((item.error_type.match(/\[REDACTED\]/g) || []).length, 3);
+  assert.doesNotMatch(item.error_type, /sk-proj-|ghp_|github_pat_|AKIAIOSFODNN7EXAMPLE/);
+  assert.equal((item.error_type.match(/\[REDACTED\]/g) || []).length, 4);
 });
 
 test('dashboard summary calculates counts and latency percentiles', () => {
