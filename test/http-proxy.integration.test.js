@@ -620,7 +620,7 @@ test('HTTP proxy rejects duplicate Host headers before contacting upstream', { s
     'Connection: close',
     '',
     body,
-  ].join('\\r\\n');
+  ].join('\r\n');
 
   const response = await new Promise((resolve, reject) => {
     const socket = netConnect(proxyPort, '127.0.0.1', () => socket.write(rawRequest));
@@ -631,7 +631,7 @@ test('HTTP proxy rejects duplicate Host headers before contacting upstream', { s
     socket.on('error', reject);
   });
 
-  assert.match(response, /^HTTP\\/1\\.1 4(?:00|03)\\b/, 'duplicate Host must be rejected with a client error');
+  assert.match(response, /^HTTP\/1\.1 4(?:00|03)\b/, 'duplicate Host must be rejected with a client error');
   assert.equal(upstreamCalls, 0, 'duplicate Host must never reach the configured upstream');
 });
 
