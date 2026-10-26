@@ -21,7 +21,8 @@ function safeText(value, limit = 160) {
   return String(value ?? '')
     .replace(/[\u0000-\u001f\u007f]/g, ' ')
     .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+=*/gi, 'Bearer [REDACTED]')
-    .replace(/([?&](?:token|secret|password|api[_-]?key|authorization)=)[^&\s]+/gi, '$1[REDACTED]')
+    .replace(/([?&](?:access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|token|secret|password|api[_-]?key|authorization|session(?:[_-]?id)?|cookie)=)[^&#\s]+/gi, '$1[REDACTED]')
+    .replace(/\b(?:sk-[A-Za-z0-9_-]{16,}|github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{30,})\b/g, '[REDACTED]')
     .slice(0, limit);
 }
 
@@ -81,7 +82,7 @@ export function getDashboardEvents({ limit = 250, afterId = 0 } = {}) {
   return events.filter((event) => event.id > safeAfter).slice(-safeLimit).map((event) => ({ ...event }));
 }
 
-export function getDashboardSummary() {
+export function getDashboardSummary({ now = Date.now(), windowMs = 60_000 } = {}) {
   const requests = events.filter((event) => event.event === 'rpc.request');
   const responses = events.filter((event) => event.event === 'rpc.response');
   const latencies = responses
@@ -95,6 +96,25 @@ export function getDashboardSummary() {
     event.is_error === true ||
     (['warn', 'error'].includes(event.level) && /rpc|contract|proxy|http/.test(event.event))).length;
   const breaking = events.filter((event) => event.event === 'contract.diff' && event.breaking === true).length;
+  const schemaDriftEvents = events.filter((event) => event.event === 'contract.diff').length;
+  const effectiveWindowMs = Math.max(1_000, Math.min(300_000, Number.isFinite(windowMs) ? windowMs : 60_000));
+  const windowStart = now - effectiveWindowMs;
+  const recentEvents = events.filter((event) => {
+    const timestamp = Date.parse(event.time);
+    return Number.isFinite(timestamp) && timestamp >= windowStart && timestamp <= now;
+  });
+  const recentRequests = recentEvents.filter((event) => event.event === 'rpc.request');
+  const recentResponses = recentEvents.filter((event) => event.event === 'rpc.response');
+  const recentErrors = recentResponses.filter((event) => event.is_error === true).length;
+  const timeouts = events.filter((event) => /timeout/i.test(event.event) || /timeout/i.test(String(event.reason ?? ''))).length;
+  const failureGroups = new Map();
+  for (const event of events) {
+    if (event.is_error !== true && !['warn', 'error'].includes(event.level)) continue;
+    const key = [event.method || 'unknown', event.tool || '', event.error_code ?? event.reason ?? event.event].join('|');
+    failureGroups.set(key, (failureGroups.get(key) ?? 0) + 1);
+  }
+  const repeatedFailureGroups = [...failureGroups.values()].filter((count) => count >= 3).length;
+  const safeWindowSeconds = effectiveWindowMs / 1000;
 
   return {
     totalEvents: totalPublished,
@@ -106,6 +126,13 @@ export function getDashboardSummary() {
     breakingChanges: breaking,
     latencyP50Ms: percentile(0.50),
     latencyP95Ms: percentile(0.95),
+    latencyP99Ms: percentile(0.99),
+    throughputRequestsPerSecond: Number((recentRequests.length / safeWindowSeconds).toFixed(3)),
+    errorRatePercent: recentResponses.length ? Number((recentErrors / recentResponses.length * 100).toFixed(2)) : 0,
+    timeouts,
+    schemaDriftEvents,
+    repeatedFailureGroups,
+    metricsWindowSeconds: safeWindowSeconds,
     latestEventId: events.length ? events[events.length - 1].id : 0,
   };
 }

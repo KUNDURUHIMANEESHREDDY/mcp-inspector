@@ -11,6 +11,7 @@ MCP Inspector is a local-first CLI with a built-in web dashboard. It sits betwee
 1. Install Node.js 22 or newer, Git, and npm.
 2. Extract this repository ZIP.
 3. Double-click `RUN_LOCAL_CHECKS.bat` first. It installs dependencies and runs static checks, tests, the dependency audit, and benchmarks. The window stays open on success or failure.
+4. Double-click `RUN_DASHBOARD.bat` to connect to a Streamable HTTP MCP server (default `http://127.0.0.1:3000`). Enter the actual upstream URL, then open `http://127.0.0.1:9911`; configure your MCP client to use the proxy at `http://127.0.0.1:9900` with the upstream's MCP path (commonly `/mcp`).
 4. After local verification succeeds, run `gh auth login` in PowerShell and double-click `PUSH_TO_GITHUB.bat` to create/push the repository.
 
 If an older extracted copy reports an OpenTelemetry `ERESOLVE` error, run `FIX_OTEL_DEPENDENCY.bat` once; it pins the API package to a version accepted by the selected SDK, then retries dependency installation. If a script stops for another reason, copy the error text from the terminal; a failed check intentionally prevents publishing.
@@ -31,15 +32,18 @@ If an older extracted copy reports an OpenTelemetry `ERESOLVE` error, run `FIX_O
 - Git is only needed for contributing.
 - An OTLP/HTTP trace collector is optional.
 
-Install dependencies from a clone or extracted source directory:
+Install the reviewed dependency graph from a clone or extracted source directory:
 
 ```bash
-npm install
+npm ci
 npm run check
 npm test
 ```
 
 The OpenTelemetry SDK/exporter versions are pinned together at `0.223.0`; `@opentelemetry/api` is pinned to `1.9.1` because SDK `0.223.0` declares a peer range below `1.10.0`. Do not use `--force` or `--legacy-peer-deps` to bypass this compatibility check. The SDK-backed interoperability tests use the official MCP TypeScript SDK v2 and a small local fixture server. If dependency installation fails, those tests cannot execute; do not treat skipped tests as passing evidence. The repository commits `package-lock.json`. CI and clean release verification use `npm ci` so the dependency graph is installed from the reviewed lockfile rather than re-resolved. When changing dependencies, regenerate the lockfile with the supported Node.js 22/npm toolchain, review the dependency diff and audit output, then verify `npm ci`, `npm run check`, `npm test`, `npm audit --audit-level=high`, and the benchmark/SBOM steps before proposing the update. Do not use `--force` or `--legacy-peer-deps` to bypass compatibility checks.
+Use `npm install` only when intentionally changing dependencies; review the resulting manifest and lockfile diff before committing.
+
+The OpenTelemetry SDK/exporter versions are pinned together at `0.223.0`; `@opentelemetry/api` is pinned to `1.9.1` because SDK `0.223.0` declares a peer range below `1.10.0`. Do not use `--force` or `--legacy-peer-deps` to bypass this compatibility check. The SDK-backed interoperability tests use the official MCP TypeScript SDK v2 and a small local fixture server. If dependency installation fails, those tests cannot execute; do not treat skipped tests as passing evidence. The repository includes `package-lock.json`. CI uses `npm ci` in the Node 22/24/26 matrix, the Windows Node 22 lane, and the browser E2E workflow so verification uses the reviewed dependency graph. The stable `required` job fails unless the full runtime matrix and Windows smoke lane pass. Keep the lockfile in sync when dependencies change; review the manifest/lockfile diff and audit output before proposing dependency updates.
 
 ## Quick start
 
@@ -105,6 +109,23 @@ mcp-inspector fuzz --max-cases 30 --case-mode mixed --execute --allow-side-effec
 
 Those two flags are intentionally required together. Even schema-valid arguments may cause side effects because the server controls tool semantics. Start with dry-run and inspect the candidate labels before enabling execution.
 
+### Protocol compatibility suite
+
+Run read-only initialize + tools/list probes against each selected transport and protocol mode. It never invokes a tool.
+
+```bash
+# stdio fixture
+node ./src/cli.js compat --transport stdio -- node ./fixtures/sdk-mcp-server.js
+
+# Streamable HTTP
+node ./src/cli.js compat --transport http --url http://127.0.0.1:3000/mcp
+
+# both transports
+node ./src/cli.js compat --transport both --url http://127.0.0.1:3000/mcp -- node ./fixtures/sdk-mcp-server.js
+```
+
+The JSON report contains one pass/fail result per transport/protocol combination, negotiated protocol era, elapsed time, tool count, and normalized contract hash. Exit code 1 means at least one probe failed. URL credentials are rejected. For protected HTTP endpoints, configure `MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN` or `MCP_INSPECTOR_UPSTREAM_HEADERS` for static credentials. `--oauth` invokes the MCP SDK's OAuth authorization-code/PKCE flow, prints the authorization URL to stderr, checks the loopback callback's Host and state, and holds tokens in memory only for the current process. OAuth requires HTTPS off loopback. Results reflect only the target endpoint actually tested; this is not blanket certification of third-party servers.
+
 ### 5. Replay a stateful workflow
 
 `workflow.example.json` demonstrates a workflow that calls the local SDK fixture's `echo` tool and feeds its structured output into `concat`. A reference can read a JSON Pointer from a prior successful tool result:
@@ -157,6 +178,10 @@ Open `http://127.0.0.1:9911` while that client-launched process is running. For 
 Use **Contracts** to compare two existing contract JSON files locally in the browser. Use **Fuzz reports** to load the JSON produced by `mcp-inspector fuzz`; the files are parsed in the browser and are not uploaded to the inspector server. These views review existing snapshots and reports rather than launching fuzz jobs from the browser.
 
 ## Observability and configuration
+
+Outbound HTTP requests enforce DNS/address checks against private and special-use IP ranges. To intentionally connect to a trusted private upstream, list its exact hostname or IP in `MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS`. This allowlist has no wildcard support. Optional upstream headers can be set with `MCP_INSPECTOR_UPSTREAM_HEADERS` as a JSON object, or configure `MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN`; do not set both for Authorization.
+
+The dashboard summary includes retained-history p50/p95/p99 latency, 60-second request throughput, response error rate, timeout count, schema-drift events, and repeated-failure groups. Metrics are bounded by the 2,000-event retention buffer and are diagnostic indicators, not a durable time-series backend.
 
 Set these environment variables only when needed:
 

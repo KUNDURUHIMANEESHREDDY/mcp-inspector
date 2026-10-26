@@ -20,7 +20,9 @@
     "audit": "npm audit --omit=dev --audit-level=high",
     "bench": "node ./bench/framer.js",
     "bench:e2e": "node ./bench/mcp-roundtrip.js",
-    "prepublishOnly": "npm run check && npm test"
+    "prepublishOnly": "npm run check && npm test",
+    "test:compat": "node --test test/compatibility.test.js test/compatibility.integration.test.js test/compatibility-oauth.test.js",
+    "test:browser": "node --test test/dashboard-browser.e2e.test.js"
   },
   "keywords": [
     "mcp",
