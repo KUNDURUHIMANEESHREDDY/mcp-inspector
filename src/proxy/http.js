@@ -277,6 +277,7 @@ function rejectPayloadTooLarge(outgoing) {
   log('warn', 'http.request_rejected', { reason: 'request_body_limit' });
   const body = 'Payload Too Large';
   outgoing.writeHead(413, {
+    'connection': 'close',
     'content-type': 'text/plain; charset=utf-8',
     'cache-control': 'no-store',
     'content-length': Buffer.byteLength(body),
