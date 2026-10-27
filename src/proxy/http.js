@@ -260,6 +260,44 @@ function rejectUnauthorized(outgoing) {
   outgoing.end(body);
 }
 
+function rejectRateLimited(outgoing, retryAfterSeconds) {
+  log('warn', 'http.request_rejected', { reason: 'proxy_auth_rate_limited' });
+  const body = 'Too Many Requests';
+  outgoing.writeHead(429, {
+    'retry-after': String(Math.max(1, retryAfterSeconds)),
+    'content-type': 'text/plain; charset=utf-8',
+    'cache-control': 'no-store',
+    'content-length': Buffer.byteLength(body),
+    'x-content-type-options': 'nosniff',
+  });
+  outgoing.end(body);
+}
+
+// Throttle failed credentials only. Use the direct socket peer rather than
+// X-Forwarded-For, which is client-controlled unless a trusted gateway parses it.
+// The map is bounded so spoofed source addresses cannot grow memory without limit.
+function createAuthFailureLimiter({ maxAttempts = 10, windowMs = 60_000, maxEntries = 4096 } = {}) {
+  const attempts = new Map();
+  const keyFor = (address) => typeof address === 'string' && address ? address : 'unknown';
+  return {
+    recordFailure(address) {
+      const key = keyFor(address);
+      const now = Date.now();
+      let entry = attempts.get(key);
+      if (!entry || now - entry.startedAt >= windowMs) entry = { startedAt: now, count: 0 };
+      entry.count += 1;
+      attempts.delete(key);
+      attempts.set(key, entry);
+      while (attempts.size > maxEntries) attempts.delete(attempts.keys().next().value);
+      if (entry.count <= maxAttempts) return 0;
+      return Math.max(1, Math.ceil((windowMs - (now - entry.startedAt)) / 1000));
+    },
+    clear(address) {
+      attempts.delete(keyFor(address));
+    },
+  };
+}
+
 function hasValidBearerToken(header, expected) {
   if (typeof header !== 'string' || typeof expected !== 'string') return false;
   const match = /^Bearer ([A-Za-z0-9._~+\/-]+=*)$/i.exec(header);
@@ -331,6 +369,7 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
   const contractRecorder = new ContractRecorder({ path: contractFile, source: contractSource || upstreamUrl.origin, update: updateContract });
   let requestSequence = 0;
   const sessionPendingStores = new Map();
+  const authFailureLimiter = createAuthFailureLimiter();
   const maxSessionStores = 256;
   const configuredMaxBytes = Number(process.env.MCP_INSPECTOR_MAX_FRAME_BYTES ?? 16 * 1024 * 1024);
   const maxInspectBytes = Number.isSafeInteger(configuredMaxBytes) && configuredMaxBytes >= 1024
@@ -385,10 +424,16 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
       outgoing.end();
       return;
     }
-    if (!localOnly && !hasValidBearerToken(incoming.headers.authorization, configuredProxyToken)) {
-      incoming.resume();
-      rejectUnauthorized(outgoing);
-      return;
+    if (!localOnly) {
+      const peerAddress = incoming.socket.remoteAddress;
+      if (!hasValidBearerToken(incoming.headers.authorization, configuredProxyToken)) {
+        const retryAfterSeconds = authFailureLimiter.recordFailure(peerAddress);
+        incoming.resume();
+        if (retryAfterSeconds > 0) rejectRateLimited(outgoing, retryAfterSeconds);
+        else rejectUnauthorized(outgoing);
+        return;
+      }
+      authFailureLimiter.clear(peerAddress);
     }
     // This is a reverse proxy for one configured upstream, not a forward
     // proxy. Accept origin-form request targets only; never construct the
