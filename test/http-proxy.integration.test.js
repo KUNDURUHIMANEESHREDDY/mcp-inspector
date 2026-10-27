@@ -782,10 +782,12 @@ test('HTTP proxy aborts chunked request bodies that cross the configured cap', {
   process.env.MCP_INSPECTOR_MAX_REQUEST_BYTES = '1024';
   let upstreamCalls = 0;
   let resolveUpstreamAborted;
+  let resolveFirstUpstreamChunk;
   const upstreamAborted = new Promise((resolve) => { resolveUpstreamAborted = resolve; });
+  const firstUpstreamChunk = new Promise((resolve) => { resolveFirstUpstreamChunk = resolve; });
   const upstream = createServer((request, response) => {
     upstreamCalls += 1;
-    request.on('data', () => {});
+    request.on('data', () => { resolveFirstUpstreamChunk(true); });
     request.once('aborted', () => {
       resolveUpstreamAborted(true);
       response.destroy();
@@ -808,28 +810,38 @@ test('HTTP proxy aborts chunked request bodies that cross the configured cap', {
     else process.env.MCP_INSPECTOR_MAX_REQUEST_BYTES = previousLimit;
   });
 
-  const result = await new Promise((resolve, reject) => {
-    let responseReceived = false;
-    const request = httpRequest({
-      hostname: '127.0.0.1',
-      port: proxyPort,
-      path: '/mcp',
-      method: 'POST',
-      headers: { 'content-type': 'application/octet-stream', 'transfer-encoding': 'chunked' },
-    }, (response) => {
-      responseReceived = true;
-      const chunks = [];
-      response.on('data', (chunk) => chunks.push(chunk));
-      response.on('end', () => resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
-      response.on('error', reject);
-    });
-    request.on('error', (error) => {
-      if (!responseReceived) reject(error);
-    });
-    request.write('a'.repeat(700));
-    request.write('b'.repeat(700));
-    request.end();
+  let resolveResponse;
+  let rejectResponse;
+  let responseReceived = false;
+  const responsePromise = new Promise((resolve, reject) => {
+    resolveResponse = resolve;
+    rejectResponse = reject;
   });
+  const request = httpRequest({
+    hostname: '127.0.0.1',
+    port: proxyPort,
+    path: '/mcp',
+    method: 'POST',
+    headers: { 'content-type': 'application/octet-stream', 'transfer-encoding': 'chunked' },
+  }, (response) => {
+    responseReceived = true;
+    const chunks = [];
+    response.on('data', (chunk) => chunks.push(chunk));
+    response.on('end', () => resolveResponse({ status: response.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
+    response.on('error', rejectResponse);
+  });
+  request.on('error', (error) => {
+    if (!responseReceived) rejectResponse(error);
+  });
+  request.write('a'.repeat(700));
+  let firstChunkTimer;
+  await Promise.race([
+    firstUpstreamChunk,
+    new Promise((_, reject) => { firstChunkTimer = setTimeout(() => reject(new Error('first chunk did not reach upstream')), 1000); }),
+  ]).finally(() => clearTimeout(firstChunkTimer));
+  request.write('b'.repeat(700));
+  request.end();
+  const result = await responsePromise;
 
   assert.equal(result.status, 413);
   assert.equal(result.body, 'Payload Too Large');
