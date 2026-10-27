@@ -45,9 +45,11 @@ jobs:
       - name: Build source archive and checksums
         env:
           RELEASE_REF: ${{ github.ref_name }}
+        shell: bash
         run: |
-          git archive --format=tar.gz --prefix=mcp-inspector/ HEAD -o "mcp-inspector-${RELEASE_REF}.tar.gz"
-          sha256sum "mcp-inspector-${RELEASE_REF}.tar.gz" mcp-inspector.cdx.json > SHA256SUMS
+          ARCHIVE_VERSION="${RELEASE_REF//\//-}"
+          git archive --format=tar.gz --prefix=mcp-inspector/ HEAD -o "mcp-inspector-${ARCHIVE_VERSION}.tar.gz"
+          sha256sum "mcp-inspector-${ARCHIVE_VERSION}.tar.gz" mcp-inspector.cdx.json > SHA256SUMS
       - name: Upload verified release assets
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
