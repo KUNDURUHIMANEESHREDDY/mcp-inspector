@@ -209,7 +209,6 @@ test('HTTP proxy throttles repeated failed remote authentication by socket peer'
         method: 'POST',
         headers,
       }, (response) => {
-        for (const _chunk of []) { /* Keep response handling below stream-safe. */ }
         const chunks = [];
         response.on('data', (chunk) => chunks.push(chunk));
         response.on('end', () => resolve({
@@ -229,7 +228,7 @@ test('HTTP proxy throttles repeated failed remote authentication by socket peer'
     }
     const limited = await send('Bearer invalid-token', '198.51.100.99');
     assert.equal(limited.status, 429);
-    assert.match(limited.headers['retry-after'], /^\\d+$/);
+    assert.match(limited.headers['retry-after'], /^\d+$/);
     assert.equal(upstreamCalls, 0, 'invalid credentials must never reach the upstream');
 
     const authorized = await send('Bearer ' + proxyToken);
