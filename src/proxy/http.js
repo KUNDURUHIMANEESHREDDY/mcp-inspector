@@ -348,7 +348,7 @@ function readMaxRequestBytes() {
   // Do not silently fall back to a larger default when an operator has set an
   // invalid cap. A typo such as "1023" must stop startup rather than weakening
   // the configured resource limit without notice.
-  if (!/^\\d+$/.test(raw)) {
+  if (!/^\d+$/.test(raw)) {
     throw new RangeError('MCP_INSPECTOR_MAX_REQUEST_BYTES must be an integer between 1024 and 67108864');
   }
   const value = Number(raw);
