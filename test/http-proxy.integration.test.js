@@ -726,3 +726,117 @@ test('HTTP proxy bounds incomplete request-header time and keeps request-body ti
   assert.equal(proxy.server.requestTimeout, 300_000);
   assert.equal(proxy.server.keepAliveTimeout, 5_000);
 });
+
+
+test('HTTP proxy rejects declared request bodies above the configured cap before opening upstream', { skip: !startHttpProxy }, async (t) => {
+  const previousLimit = process.env.MCP_INSPECTOR_MAX_REQUEST_BYTES;
+  process.env.MCP_INSPECTOR_MAX_REQUEST_BYTES = '1024';
+  let upstreamCalls = 0;
+  const upstream = createServer((request, response) => {
+    upstreamCalls += 1;
+    request.resume();
+    response.writeHead(200);
+    response.end('upstream reached');
+  });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  const upstreamPort = upstream.address().port;
+  const proxy = startHttpProxy({ upstream: `http://127.0.0.1:${upstreamPort}`, listen: '127.0.0.1:0' });
+  if (!proxy.server.listening) await once(proxy.server, 'listening');
+  const proxyPort = proxy.server.address().port;
+  t.after(async () => {
+    await proxy.close();
+    await new Promise((resolve) => upstream.close(resolve));
+    if (previousLimit === undefined) delete process.env.MCP_INSPECTOR_MAX_REQUEST_BYTES;
+    else process.env.MCP_INSPECTOR_MAX_REQUEST_BYTES = previousLimit;
+  });
+
+  const body = 'x'.repeat(2048);
+  const result = await new Promise((resolve, reject) => {
+    const request = httpRequest({
+      hostname: '127.0.0.1',
+      port: proxyPort,
+      path: '/mcp',
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'content-length': String(Buffer.byteLength(body)),
+      },
+    }, (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
+      response.on('error', reject);
+    });
+    request.on('error', reject);
+    request.end(body);
+  });
+
+  assert.equal(result.status, 413);
+  assert.equal(result.body, 'Payload Too Large');
+  assert.equal(upstreamCalls, 0, 'declared oversized requests must be rejected before contacting upstream');
+});
+
+test('HTTP proxy aborts chunked request bodies that cross the configured cap', { skip: !startHttpProxy }, async (t) => {
+  const previousLimit = process.env.MCP_INSPECTOR_MAX_REQUEST_BYTES;
+  process.env.MCP_INSPECTOR_MAX_REQUEST_BYTES = '1024';
+  let upstreamCalls = 0;
+  let resolveUpstreamAborted;
+  const upstreamAborted = new Promise((resolve) => { resolveUpstreamAborted = resolve; });
+  const upstream = createServer((request, response) => {
+    upstreamCalls += 1;
+    request.on('data', () => {});
+    request.once('aborted', () => {
+      resolveUpstreamAborted(true);
+      response.destroy();
+    });
+    request.once('end', () => {
+      response.writeHead(200);
+      response.end('upstream reached');
+    });
+  });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  const upstreamPort = upstream.address().port;
+  const proxy = startHttpProxy({ upstream: `http://127.0.0.1:${upstreamPort}`, listen: '127.0.0.1:0' });
+  if (!proxy.server.listening) await once(proxy.server, 'listening');
+  const proxyPort = proxy.server.address().port;
+  t.after(async () => {
+    await proxy.close();
+    await new Promise((resolve) => upstream.close(resolve));
+    if (previousLimit === undefined) delete process.env.MCP_INSPECTOR_MAX_REQUEST_BYTES;
+    else process.env.MCP_INSPECTOR_MAX_REQUEST_BYTES = previousLimit;
+  });
+
+  const result = await new Promise((resolve, reject) => {
+    let responseReceived = false;
+    const request = httpRequest({
+      hostname: '127.0.0.1',
+      port: proxyPort,
+      path: '/mcp',
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream', 'transfer-encoding': 'chunked' },
+    }, (response) => {
+      responseReceived = true;
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
+      response.on('error', reject);
+    });
+    request.on('error', (error) => {
+      if (!responseReceived) reject(error);
+    });
+    request.write('a'.repeat(700));
+    request.write('b'.repeat(700));
+    request.end();
+  });
+
+  assert.equal(result.status, 413);
+  assert.equal(result.body, 'Payload Too Large');
+  assert.equal(upstreamCalls, 1, 'the streamed request should be terminated rather than fully forwarded');
+  assert.equal(
+    await Promise.race([upstreamAborted, new Promise((resolve) => setTimeout(() => resolve(false), 1000))]),
+    true,
+    'the upstream request must be aborted after the body cap is crossed',
+  );
+});
