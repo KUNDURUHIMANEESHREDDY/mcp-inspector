@@ -782,13 +782,17 @@ test('HTTP proxy aborts chunked request bodies that cross the configured cap', {
   const previousLimit = process.env.MCP_INSPECTOR_MAX_REQUEST_BYTES;
   process.env.MCP_INSPECTOR_MAX_REQUEST_BYTES = '1024';
   let upstreamCalls = 0;
+  let upstreamReceivedBytes = 0;
   let resolveUpstreamAborted;
   let resolveFirstUpstreamChunk;
   const upstreamAborted = new Promise((resolve) => { resolveUpstreamAborted = resolve; });
   const firstUpstreamChunk = new Promise((resolve) => { resolveFirstUpstreamChunk = resolve; });
   const upstream = createServer((request, response) => {
     upstreamCalls += 1;
-    request.on('data', () => { resolveFirstUpstreamChunk(true); });
+    request.on('data', (chunk) => {
+      upstreamReceivedBytes += chunk.length;
+      resolveFirstUpstreamChunk(true);
+    });
     request.once('aborted', () => {
       resolveUpstreamAborted(true);
       response.destroy();
@@ -861,5 +865,9 @@ test('HTTP proxy aborts chunked request bodies that cross the configured cap', {
     await Promise.race([upstreamAborted, new Promise((resolve) => setTimeout(() => resolve(false), 1000))]),
     true,
     'the upstream request must be aborted after the body cap is crossed',
+  );
+  assert.ok(
+    upstreamReceivedBytes <= 1024,
+    'the chunk that crosses the body cap must not be forwarded upstream',
   );
 });
