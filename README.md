@@ -205,6 +205,7 @@ Set these environment variables only when needed:
 | `OTEL_SERVICE_NAME` | `mcp-inspector` | Service name recognized by the OpenTelemetry SDK |
 | `MCP_INSPECTOR_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error` |
 | `MCP_INSPECTOR_MAX_FRAME_BYTES` | `16777216` | Maximum inspected JSON-RPC frame / SSE event in bytes |
+| `MCP_INSPECTOR_MAX_REQUEST_BYTES` | `16777216` | Maximum raw HTTP request body in bytes; oversized declared or streamed bodies receive HTTP 413 (configured range 1 KiB–64 MiB) |
 | `MCP_INSPECTOR_RPC_TIMEOUT_MS` | `120000` | Pending request timeout, from 1 second to 1 hour |
 | `MCP_INSPECTOR_MAX_PENDING_REQUESTS` | `10000` | Maximum pending RPC correlations per transport store |
 | `MCP_INSPECTOR_SESSION_IDLE_MS` | `1800000` | Legacy HTTP session idle TTL, 1 minute to 24 hours |
