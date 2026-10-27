@@ -765,7 +765,7 @@ test('HTTP proxy rejects declared request bodies above the configured cap before
     }, (response) => {
       const chunks = [];
       response.on('data', (chunk) => chunks.push(chunk));
-      response.on('end', () => resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
+      response.on('end', () => resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString('utf8'), headers: response.headers }));
       response.on('error', reject);
     });
     request.on('error', reject);
@@ -774,6 +774,7 @@ test('HTTP proxy rejects declared request bodies above the configured cap before
 
   assert.equal(result.status, 413);
   assert.equal(result.body, 'Payload Too Large');
+  assert.equal(result.headers.connection, 'close');
   assert.equal(upstreamCalls, 0, 'declared oversized requests must be rejected before contacting upstream');
 });
 
@@ -827,7 +828,7 @@ test('HTTP proxy aborts chunked request bodies that cross the configured cap', {
     responseReceived = true;
     const chunks = [];
     response.on('data', (chunk) => chunks.push(chunk));
-    response.on('end', () => resolveResponse({ status: response.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
+    response.on('end', () => resolveResponse({ status: response.statusCode, body: Buffer.concat(chunks).toString('utf8'), headers: response.headers }));
     response.on('error', rejectResponse);
   });
   request.on('error', (error) => {
@@ -845,6 +846,7 @@ test('HTTP proxy aborts chunked request bodies that cross the configured cap', {
 
   assert.equal(result.status, 413);
   assert.equal(result.body, 'Payload Too Large');
+  assert.equal(result.headers.connection, 'close');
   assert.equal(upstreamCalls, 1, 'the streamed request should be terminated rather than fully forwarded');
   assert.equal(
     await Promise.race([upstreamAborted, new Promise((resolve) => setTimeout(() => resolve(false), 1000))]),
