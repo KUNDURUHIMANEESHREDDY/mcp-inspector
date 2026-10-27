@@ -341,6 +341,23 @@ function inspectJsonBody(inspector, chunks, totalBytes, maxBytes) {
   });
 }
 
+function readMaxRequestBytes() {
+  const raw = process.env.MCP_INSPECTOR_MAX_REQUEST_BYTES;
+  if (raw === undefined) return 16 * 1024 * 1024;
+
+  // Do not silently fall back to a larger default when an operator has set an
+  // invalid cap. A typo such as "1023" must stop startup rather than weakening
+  // the configured resource limit without notice.
+  if (!/^\\d+$/.test(raw)) {
+    throw new RangeError('MCP_INSPECTOR_MAX_REQUEST_BYTES must be an integer between 1024 and 67108864');
+  }
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1024 || value > 64 * 1024 * 1024) {
+    throw new RangeError('MCP_INSPECTOR_MAX_REQUEST_BYTES must be an integer between 1024 and 67108864');
+  }
+  return value;
+}
+
 export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemote = false, contractFile, contractSource, updateContract = false } = {}) {
   if (!upstream) throw new Error('--upstream is required for HTTP proxy mode');
   const upstreamUrl = new URL(upstream);
@@ -398,11 +415,7 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
   const maxInspectBytes = Number.isSafeInteger(configuredMaxBytes) && configuredMaxBytes >= 1024
     ? configuredMaxBytes
     : 16 * 1024 * 1024;
-  const configuredMaxRequestBytes = Number(process.env.MCP_INSPECTOR_MAX_REQUEST_BYTES ?? 16 * 1024 * 1024);
-  const maxRequestBytes = Number.isSafeInteger(configuredMaxRequestBytes) &&
-    configuredMaxRequestBytes >= 1024 && configuredMaxRequestBytes <= 64 * 1024 * 1024
-    ? configuredMaxRequestBytes
-    : 16 * 1024 * 1024;
+  const maxRequestBytes = readMaxRequestBytes();
 
   const server = createServer((incoming, outgoing) => {
     const hostHeaderCount = incoming.rawHeaders.reduce((count, name, index) =>
