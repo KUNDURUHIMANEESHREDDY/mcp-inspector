@@ -620,28 +620,40 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
     outgoing.on('close', () => {
       if (!upstreamReq.destroyed && !upstreamReq.writableEnded) upstreamReq.destroy();
     });
-    // Enforce a hard request-body cap even when Content-Length is absent or false.
-    // Count bytes before the pipe listener so the crossing chunk is not intentionally
-    // forwarded; destroy the upstream request and suppress its expected error response.
+    // Write each accepted chunk only after checking the cap. A Transform/pipe
+    // listener can still observe a chunk already queued for emission when it is
+    // unpiped; explicit writes guarantee the chunk crossing the limit is never
+    // intentionally forwarded. Preserve backpressure while the upstream drains.
     incoming.on('data', (chunk) => {
       if (requestTooLarge) return;
       forwardedRequestBytes += chunk.length;
-      if (forwardedRequestBytes <= maxRequestBytes) return;
-      requestTooLarge = true;
-      log('warn', 'http.request_rejected', {
-        reason: 'request_body_limit',
-        bytes: forwardedRequestBytes,
-        max_bytes: maxRequestBytes,
-      });
-      incoming.unpipe(upstreamReq);
-      incoming.pause();
-      if (!outgoing.headersSent && !outgoing.destroyed) rejectPayloadTooLarge(outgoing, incoming);
-      else if (!outgoing.destroyed) outgoing.destroy();
-      upstreamReq.destroy(new Error('Request body limit exceeded'));
+      if (forwardedRequestBytes > maxRequestBytes) {
+        requestTooLarge = true;
+        log('warn', 'http.request_rejected', {
+          reason: 'request_body_limit',
+          bytes: forwardedRequestBytes,
+          max_bytes: maxRequestBytes,
+        });
+        incoming.pause();
+        if (!outgoing.headersSent && !outgoing.destroyed) rejectPayloadTooLarge(outgoing, incoming);
+        else if (!outgoing.destroyed) outgoing.destroy();
+        upstreamReq.destroy(new Error('Request body limit exceeded'));
+        return;
+      }
+      if (!upstreamReq.write(chunk)) incoming.pause();
     });
-
-    // Register the byte-forwarding pipe after the limit monitor.
-    incoming.pipe(upstreamReq);
+    incoming.on('end', () => {
+      if (!requestTooLarge && !upstreamReq.destroyed && !upstreamReq.writableEnded) upstreamReq.end();
+    });
+    incoming.on('aborted', () => {
+      if (!upstreamReq.destroyed) upstreamReq.destroy(new Error('Client aborted request'));
+    });
+    incoming.on('error', (error) => {
+      if (!upstreamReq.destroyed) upstreamReq.destroy(error);
+    });
+    upstreamReq.on('drain', () => {
+      if (!requestTooLarge && !incoming.destroyed) incoming.resume();
+    });
 
     const requestContentType = String(incoming.headers['content-type'] || '').toLowerCase();
     const requestEncoding = String(incoming.headers['content-encoding'] || 'identity').toLowerCase();
