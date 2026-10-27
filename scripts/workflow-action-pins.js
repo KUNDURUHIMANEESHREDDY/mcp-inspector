@@ -2,7 +2,8 @@ export function findUnpinnedActionReferences(source, file = '<workflow>') {
   const issues = [];
   const lines = String(source).split(/\r?\n/);
   for (let index = 0; index < lines.length; index += 1) {
-    const match = /^\s*uses:\s*([^\s#]+)/.exec(lines[index]);
+    // GitHub Actions step syntax commonly prefixes `uses:` with a YAML list dash.
+    const match = /^\s*(?:-\s*)?uses:\s*([^\s#]+)/.exec(lines[index]);
     if (!match) continue;
     const reference = match[1];
     if (reference.startsWith('./')) continue;
