@@ -273,7 +273,10 @@ function rejectRateLimited(outgoing, retryAfterSeconds) {
   outgoing.end(body);
 }
 
-function rejectPayloadTooLarge(outgoing) {
+function rejectPayloadTooLarge(outgoing, incoming) {
+  // Capture the socket before ending the response. A client that exceeds the
+  // body cap must not keep an unbounded request stream alive after the 413.
+  const socket = incoming?.socket ?? outgoing.socket;
   log('warn', 'http.request_rejected', { reason: 'request_body_limit' });
   const body = 'Payload Too Large';
   outgoing.writeHead(413, {
@@ -282,6 +285,13 @@ function rejectPayloadTooLarge(outgoing) {
     'cache-control': 'no-store',
     'content-length': Buffer.byteLength(body),
     'x-content-type-options': 'nosniff',
+  });
+  outgoing.once('finish', () => {
+    if (!socket || socket.destroyed) return;
+    // destroySoon flushes the 413 before closing the connection, without
+    // continuing to drain an arbitrarily large or never-ending request body.
+    if (typeof socket.destroySoon === 'function') socket.destroySoon();
+    else socket.destroy();
   });
   outgoing.end(body);
 }
@@ -476,8 +486,7 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
     if (declaredLengthHeader !== undefined) {
       const declaredLength = Number(declaredLengthHeader);
       if (Number.isSafeInteger(declaredLength) && declaredLength > maxRequestBytes) {
-        incoming.resume();
-        rejectPayloadTooLarge(outgoing);
+        rejectPayloadTooLarge(outgoing, incoming);
         return;
       }
     }
@@ -625,7 +634,8 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
         max_bytes: maxRequestBytes,
       });
       incoming.unpipe(upstreamReq);
-      if (!outgoing.headersSent && !outgoing.destroyed) rejectPayloadTooLarge(outgoing);
+      incoming.pause();
+      if (!outgoing.headersSent && !outgoing.destroyed) rejectPayloadTooLarge(outgoing, incoming);
       else if (!outgoing.destroyed) outgoing.destroy();
       upstreamReq.destroy(new Error('Request body limit exceeded'));
     });
