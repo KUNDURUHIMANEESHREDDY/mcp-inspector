@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { findUnpinnedActionReferences } from '../scripts/workflow-action-pins.js';
 
@@ -40,4 +41,19 @@ test('reports every unpinned reference with its source line', () => {
     { line: 3, reference: 'actions/checkout@v4' },
     { line: 4, reference: 'actions/setup-node@main' },
   ]);
+});
+
+test('keeps release write permission isolated to the publish job', async () => {
+  const workflow = await readFile(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8');
+  const packageJob = workflow.match(/^  package:\n([\s\S]*?)(?=^  publish:\n)/m)?.[1];
+  const publishJob = workflow.match(/^  publish:\n([\s\S]*)$/m)?.[1];
+
+  assert.ok(packageJob, 'release package job must exist');
+  assert.ok(publishJob, 'release publish job must exist');
+  assert.match(workflow, /^permissions:\n  contents: read\s*$/m);
+  assert.match(packageJob, /^[ \t]+permissions:\n[ \t]+contents: read\s*$/m);
+  assert.doesNotMatch(packageJob, /contents:\s*write/);
+  assert.match(publishJob, /^[ \t]+permissions:\n[ \t]+contents: write\s*$/m);
+  assert.match(publishJob, /^[ \t]+needs:\s+\[package\]\s*$/m);
+  assert.match(publishJob, /^[ \t]+if:\s+startsWith\(github\.ref, 'refs\/tags\/'\)/m);
 });
