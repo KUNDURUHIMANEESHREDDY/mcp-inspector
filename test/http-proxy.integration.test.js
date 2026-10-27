@@ -162,6 +162,89 @@ test('HTTP proxy authenticates remote clients without forwarding the proxy crede
   }
 });
 
+test('HTTP proxy throttles repeated failed remote authentication by socket peer', { skip: !startHttpProxy }, async () => {
+  let upstreamCalls = 0;
+  const upstream = createServer(async (request, response) => {
+    upstreamCalls += 1;
+    for await (const _chunk of request) { /* Drain bodies without logging them. */ }
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end('{"jsonrpc":"2.0","id":1,"result":{"ok":true}}');
+  });
+  const envNames = [
+    'MCP_INSPECTOR_PROXY_BEARER_TOKEN',
+    'MCP_INSPECTOR_ALLOWED_ORIGINS',
+    'MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN',
+    'MCP_INSPECTOR_UPSTREAM_HEADERS',
+    'MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS',
+  ];
+  const previousEnv = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
+  const proxyToken = 'test-client-token-with-at-least-32-characters';
+  let proxy;
+  try {
+    process.env.MCP_INSPECTOR_PROXY_BEARER_TOKEN = proxyToken;
+    process.env.MCP_INSPECTOR_ALLOWED_ORIGINS = 'https://console.example';
+    delete process.env.MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN;
+    delete process.env.MCP_INSPECTOR_UPSTREAM_HEADERS;
+    delete process.env.MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS;
+
+    upstream.listen(0, '127.0.0.1');
+    await once(upstream, 'listening');
+    const upstreamAddress = upstream.address();
+    proxy = startHttpProxy({
+      upstream: 'http://127.0.0.1:' + upstreamAddress.port,
+      listen: '0.0.0.0:0',
+      allowRemote: true,
+    });
+    if (!proxy.server.listening) await once(proxy.server, 'listening');
+    const proxyAddress = proxy.server.address();
+
+    const send = (authorization, forwardedFor) => new Promise((resolve, reject) => {
+      const headers = { 'content-type': 'application/json' };
+      if (authorization !== undefined) headers.authorization = authorization;
+      if (forwardedFor) headers['x-forwarded-for'] = forwardedFor;
+      const request = httpRequest({
+        hostname: '127.0.0.1',
+        port: proxyAddress.port,
+        path: '/mcp',
+        method: 'POST',
+        headers,
+      }, (response) => {
+        for (const _chunk of []) { /* Keep response handling below stream-safe. */ }
+        const chunks = [];
+        response.on('data', (chunk) => chunks.push(chunk));
+        response.on('end', () => resolve({
+          status: response.statusCode,
+          headers: response.headers,
+          body: Buffer.concat(chunks).toString('utf8'),
+        }));
+        response.on('error', reject);
+      });
+      request.on('error', reject);
+      request.end('{"jsonrpc":"2.0","id":1,"method":"ping"}');
+    });
+
+    for (let i = 0; i < 10; i += 1) {
+      const rejected = await send('Bearer invalid-token', '203.0.113.' + (i + 1));
+      assert.equal(rejected.status, 401, 'the first ten failures retain the normal bearer challenge');
+    }
+    const limited = await send('Bearer invalid-token', '198.51.100.99');
+    assert.equal(limited.status, 429);
+    assert.match(limited.headers['retry-after'], /^\\d+$/);
+    assert.equal(upstreamCalls, 0, 'invalid credentials must never reach the upstream');
+
+    const authorized = await send('Bearer ' + proxyToken);
+    assert.equal(authorized.status, 200, 'valid credentials must continue to work after failed attempts');
+    assert.equal(upstreamCalls, 1);
+  } finally {
+    if (proxy) await proxy.close();
+    if (upstream.listening) await new Promise((resolve) => upstream.close(resolve));
+    for (const name of envNames) {
+      if (previousEnv[name] === undefined) delete process.env[name];
+      else process.env[name] = previousEnv[name];
+    }
+  }
+});
+
 test('HTTP proxy rejects empty entries in the upstream host allowlist', { skip: !startHttpProxy }, async () => {
   const previous = process.env.MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS;
   let proxy;
