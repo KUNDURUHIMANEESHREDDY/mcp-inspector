@@ -44,7 +44,9 @@ test('reports every unpinned reference with its source line', () => {
 });
 
 test('keeps release write permission isolated to the publish job', async () => {
-  const workflow = await readFile(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8');
+  // GitHub's Windows checkout may use CRLF; normalize before checking YAML structure.
+  const workflow = (await readFile(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8'))
+    .replace(/\r\n/g, '\n');
   const packageJob = workflow.match(/^  package:\n([\s\S]*?)(?=^  publish:\n)/m)?.[1];
   const publishJob = workflow.match(/^  publish:\n([\s\S]*)$/m)?.[1];
 
