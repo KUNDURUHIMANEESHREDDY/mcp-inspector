@@ -834,6 +834,9 @@ test('HTTP proxy aborts chunked request bodies that cross the configured cap', {
   request.on('error', (error) => {
     if (!responseReceived) rejectResponse(error);
   });
+  let resolveClientClosed;
+  const clientClosed = new Promise((resolve) => { resolveClientClosed = resolve; });
+  request.once('close', () => resolveClientClosed(true));
   request.write('a'.repeat(700));
   let firstChunkTimer;
   await Promise.race([
@@ -841,13 +844,19 @@ test('HTTP proxy aborts chunked request bodies that cross the configured cap', {
     new Promise((_, reject) => { firstChunkTimer = setTimeout(() => reject(new Error('first chunk did not reach upstream')), 1000); }),
   ]).finally(() => clearTimeout(firstChunkTimer));
   request.write('b'.repeat(700));
-  request.end();
+  // Deliberately keep the request open. The proxy must close an oversized
+  // stream instead of draining an attacker-controlled remainder.
   const result = await responsePromise;
 
   assert.equal(result.status, 413);
   assert.equal(result.body, 'Payload Too Large');
   assert.equal(result.headers.connection, 'close');
   assert.equal(upstreamCalls, 1, 'the streamed request should be terminated rather than fully forwarded');
+  assert.equal(
+    await Promise.race([clientClosed, new Promise((resolve) => setTimeout(() => resolve(false), 1000))]),
+    true,
+    'the client connection must close without waiting for the oversized request to end',
+  );
   assert.equal(
     await Promise.race([upstreamAborted, new Promise((resolve) => setTimeout(() => resolve(false), 1000))]),
     true,
