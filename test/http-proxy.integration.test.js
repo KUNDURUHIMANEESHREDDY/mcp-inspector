@@ -871,3 +871,22 @@ test('HTTP proxy aborts chunked request bodies that cross the configured cap', {
     'the chunk that crosses the body cap must not be forwarded upstream',
   );
 });
+
+
+test('HTTP proxy rejects invalid request-body limit configuration at startup', { skip: !startHttpProxy }, () => {
+  const previousLimit = process.env.MCP_INSPECTOR_MAX_REQUEST_BYTES;
+  const invalidLimits = ['1023', '67108865', '', 'not-a-number'];
+  try {
+    for (const value of invalidLimits) {
+      process.env.MCP_INSPECTOR_MAX_REQUEST_BYTES = value;
+      assert.throws(
+        () => startHttpProxy({ upstream: 'http://127.0.0.1:9', listen: '127.0.0.1:0' }),
+        /MCP_INSPECTOR_MAX_REQUEST_BYTES must be an integer between 1024 and 67108864/,
+        `invalid request body cap should fail startup: ${JSON.stringify(value)}`,
+      );
+    }
+  } finally {
+    if (previousLimit === undefined) delete process.env.MCP_INSPECTOR_MAX_REQUEST_BYTES;
+    else process.env.MCP_INSPECTOR_MAX_REQUEST_BYTES = previousLimit;
+  }
+});
