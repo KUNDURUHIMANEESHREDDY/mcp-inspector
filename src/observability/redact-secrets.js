@@ -12,7 +12,7 @@ const KNOWN_TOKEN_FORMAT = /\b(?:sk-[A-Za-z0-9_-]{16,}|github_pat_[A-Za-z0-9_]{2
 export function redactSecrets(value) {
   return String(value ?? '')
     .replace(URL_USERINFO, '$1[REDACTED]@')
-    .replace(BASIC_AUTH_CREDENTIAL, '$1[REDACTED]')
+    .replace(AUTHORIZATION_HEADER, '$1[REDACTED]')
     .replace(SENSITIVE_HEADER, '$1[REDACTED]')
     .replace(BEARER_CREDENTIAL, 'Bearer [REDACTED]')
     .replace(SENSITIVE_QUERY_PARAMETER, '$1[REDACTED]')
