@@ -26,12 +26,30 @@ test('shared redaction covers supported credential formats and URL parameters', 
 
   assert.doesNotMatch(safe, /bearer-example-secret|query-access-secret|query-refresh-secret/);
   for (const token of tokens) assert.ok(!safe.includes(token), `token was not redacted: ${token.slice(0, 8)}`);
-  assert.match(safe, /Bearer \[REDACTED\]/);
-  assert.match(safe, /access_token=\[REDACTED\]/);
-  assert.match(safe, /refresh_token=\[REDACTED\]/);
-  assert.equal((safe.match(/\[REDACTED\]/g) || []).length, tokens.length + 3);
+  assert.match(safe, /Bearer \\[REDACTED\\]/);
+  assert.match(safe, /access_token=\\[REDACTED\\]/);
+  assert.match(safe, /refresh_token=\\[REDACTED\\]/);
+  assert.equal((safe.match(/\\[REDACTED\\]/g) || []).length, tokens.length + 3);
 });
 
 test('shared redaction preserves ordinary diagnostic text', () => {
   assert.equal(redactSecrets('rpc.request method=tools/call'), 'rpc.request method=tools/call');
+});
+
+test('shared redaction removes Basic credentials, sensitive headers, and URL userinfo', () => {
+  const input = [
+    ['Authorization: Basic ', 'dXNlcjpwYXNz'].join(''),
+    ['Proxy-Authorization: Basic ', 'cHJveHk6cGFzcw=='].join(''),
+    ['X-API-Key: ', 'header-api-key-secret'].join(''),
+    ['Cookie: session=', 'cookie-session-secret'].join(''),
+    ['https://', 'user:password', '@example.test/path'].join(''),
+  ].join('\\n');
+  const safe = redactSecrets(input);
+
+  assert.doesNotMatch(safe, /dXNlcjpwYXNz|cHJveHk6cGFzcw==|header-api-key-secret|cookie-session-secret|user:password/);
+  assert.match(safe, /Authorization: \\[REDACTED\\]/);
+  assert.match(safe, /Proxy-Authorization: \\[REDACTED\\]/);
+  assert.match(safe, /X-API-Key: \\[REDACTED\\]/);
+  assert.match(safe, /Cookie: \\[REDACTED\\]/);
+  assert.match(safe, /https:\\/\\/\\[REDACTED\\]@example\\.test\\/path/);
 });
