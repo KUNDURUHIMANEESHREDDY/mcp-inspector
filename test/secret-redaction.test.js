@@ -104,3 +104,19 @@ test('redacts semicolon-delimited credentials while preserving safe query values
   assert.match(safe, /;access_token=\[REDACTED\]/);
   assert.match(safe, /;client%2Dsecret=\[REDACTED\]/);
 });
+
+test('redacts bracketed credential query keys while preserving safe arrays', () => {
+  const input = [
+    'https://example.test/callback?access_token[]=array-access-secret',
+    '&client%5Fsecret%5B0%5D=array-client-secret',
+    '&refresh_token[primary][value]=nested-refresh-secret',
+    '&safe[0]=keep-this-value',
+  ].join('');
+  const safe = redactSecrets(input);
+
+  assert.doesNotMatch(safe, /array-access-secret|array-client-secret|nested-refresh-secret/);
+  assert.match(safe, /access_token\[\]=\[REDACTED\]/);
+  assert.match(safe, /client%5Fsecret%5B0%5D=\[REDACTED\]/);
+  assert.match(safe, /refresh_token\[primary\]\[value\]=\[REDACTED\]/);
+  assert.match(safe, /safe\[0\]=keep-this-value/);
+});
