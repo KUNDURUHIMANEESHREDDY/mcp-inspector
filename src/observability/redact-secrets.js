@@ -26,7 +26,7 @@ function isSensitiveQueryParameterName(name) {
 function resemblesSensitiveEncodedQueryName(name) {
   // Used only when decoding fails or a bounded decode depth is exhausted.
   // The %25* form also catches credentials nested behind repeated encoding.
-  return /(?:access|refresh|id|client|api|private|oauth)(?:(?:%25)*(?:5f|2d)|[_-])?(?:%25)*(?:token|secret|key)|^(?:code|state|signature|sig|jwt|assertion|password|authorization|cookie|session)/i.test(name);
+  return /(?:access|refresh|id|client|api|private|oauth)(?:(?:%25)*%?(?:5f|2d)|[_-])?(?:%25)*(?:token|secret|key)|^(?:code|state|signature|sig|jwt|assertion|password|authorization|cookie|session)/i.test(name);
 }
 
 function redactQueryParameters(value) {
