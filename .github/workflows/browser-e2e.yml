@@ -30,8 +30,11 @@ jobs:
       # Pin the browser driver so the installed Chromium revision is reproducible.
       - name: Install pinned Playwright without changing project manifests
         run: npm install --no-save --no-package-lock playwright@1.64.1
+      # The GitHub-hosted Ubuntu image already provides the common Chromium
+      # system libraries. Avoid a full apt upgrade/font installation here:
+      # it can consume the whole job timeout on a slow mirror before E2E starts.
       - name: Install Chromium
-        run: timeout 8m npx playwright install --with-deps chromium
+        run: timeout 8m npx playwright install chromium
       - name: Static checks
         run: npm run check
       - name: Run real browser test

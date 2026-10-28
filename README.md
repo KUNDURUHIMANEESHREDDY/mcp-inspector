@@ -4,7 +4,7 @@
 
 MCP Inspector is a local-first CLI with a built-in web dashboard. It sits between an MCP client and server or proxies Streamable HTTP traffic. It forwards original transport bytes and performs bounded, side-channel inspection so teams can investigate latency, JSON-RPC failures, tool-schema drift, and edge-case tool handling without logging prompts or tool arguments by default.
 
-> **Release status:** early-stage software. Unit and local proxy tests are available, and an official-SDK interoperability suite is included for CI. Run the full dependency-backed suite, inspect the SBOM and audit findings, and benchmark your own servers before production use. Remote HTTP binding is not an authenticated gateway.
+> **Release status:** early-stage software. Unit and local proxy tests are available, and an official-SDK interoperability suite is included for CI. Run the full dependency-backed suite, inspect the SBOM and audit findings, and benchmark your own servers before production use. Remote HTTP binding requires a shared client bearer token and an exact Origin allowlist, but still needs a TLS-terminating, rate-limiting gateway for internet exposure.
 
 ## Windows quick start
 
@@ -68,7 +68,21 @@ Point the MCP client at `http://127.0.0.1:9900/mcp` if your upstream endpoint is
 
 For a private upstream, set `MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN` in the process environment. Credentials are not read from the upstream URL. The token is sent only over HTTPS for non-loopback upstream hosts.
 
-**Do not add `--allow-remote` unless you have placed an authenticated, TLS-terminating, rate-limiting gateway in front of the proxy.** That flag only changes the bind check; it does not add authentication, authorization, TLS, or rate limits.
+**Do not add `--allow-remote` unless you have placed a TLS-terminating, rate-limiting gateway in front of the proxy.** Non-loopback binding now also requires `MCP_INSPECTOR_PROXY_BEARER_TOKEN` (at least 32 characters) and a non-empty `MCP_INSPECTOR_ALLOWED_ORIGINS` list. The shared bearer token authenticates clients to this proxy but is not per-user authorization and does not provide TLS or rate limits.
+
+Generate a random token rather than inventing a memorable string. In Bash, this sets the variable without printing the generated value:
+
+```bash
+export MCP_INSPECTOR_PROXY_BEARER_TOKEN="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64url"))')"
+```
+
+In PowerShell:
+
+```powershell
+$env:MCP_INSPECTOR_PROXY_BEARER_TOKEN = node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64url'))"
+```
+
+In deployment, inject the token from your secret manager. Do not commit it, put it in a URL, or pass it as a command-line argument where it may appear in process listings.
 
 ### 3. Capture a tool contract
 
@@ -194,11 +208,12 @@ Set these environment variables only when needed:
 | `MCP_INSPECTOR_RPC_TIMEOUT_MS` | `120000` | Pending request timeout, from 1 second to 1 hour |
 | `MCP_INSPECTOR_MAX_PENDING_REQUESTS` | `10000` | Maximum pending RPC correlations per transport store |
 | `MCP_INSPECTOR_SESSION_IDLE_MS` | `1800000` | Legacy HTTP session idle TTL, 1 minute to 24 hours |
+| `MCP_INSPECTOR_PROXY_BEARER_TOKEN` | unset | Required for non-loopback proxy binds; use a high-entropy secret of at least 32 characters. This client credential is not forwarded upstream. |
 | `MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN` | unset | Optional bearer token for the configured HTTP upstream |
 | `MCP_INSPECTOR_UPSTREAM_TIMEOUT_MS` | `120000` | Upstream inactivity timeout, from 1 second to 1 hour |
-| `MCP_INSPECTOR_ALLOWED_ORIGINS` | unset | Exact comma-separated browser Origin allowlist; required for remote browser access |
+| `MCP_INSPECTOR_ALLOWED_ORIGINS` | unset | Exact comma-separated canonical Origin allowlist; required for non-loopback binding and browser preflight |
 
-The HTTP proxy binds to loopback by default. For browser requests, it rejects non-loopback Host values and only permits loopback Origins unless `MCP_INSPECTOR_ALLOWED_ORIGINS` lists exact canonical origins. Remote bindings require `--allow-remote`; place an authenticated gateway in front and configure the origin allowlist before enabling browser access. The proxy enforces Origin validation in line with the MCP Streamable HTTP security requirements.
+The HTTP proxy binds to loopback by default. A non-loopback bind requires `--allow-remote`, a high-entropy `MCP_INSPECTOR_PROXY_BEARER_TOKEN` (minimum 32 characters), and an exact non-empty `MCP_INSPECTOR_ALLOWED_ORIGINS` allowlist. Requests must send `Authorization: Bearer <token>`; unauthenticated requests receive 401, and the proxy credential is removed before forwarding to the upstream. Configure upstream credentials separately with `MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN` or `MCP_INSPECTOR_UPSTREAM_HEADERS`. Repeated failed bearer authentication from the same socket peer is throttled after 10 failures per 60-second window; the direct socket peer is used rather than trusting client-supplied forwarding headers. This is only brute-force friction, not general request rate limiting. The shared token is not per-user authorization, and the proxy still does not provide TLS or general request rate limits, so place a TLS-terminating, rate-limiting gateway in front before internet exposure. The proxy also validates Host authority syntax on every bind and enforces Origin validation in line with MCP Streamable HTTP security requirements.
 
 Logs are structured JSON on stderr. Request arguments, prompts, and tool results are not logged or attached to spans. String JSON-RPC IDs are hashed before being used in metadata. Tool names, schema names, endpoint paths, server identity, error details, and exported traces can still be sensitive operational metadata; protect logs and collector access accordingly.
 

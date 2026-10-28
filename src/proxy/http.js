@@ -1,3 +1,5 @@
+import { timingSafeEqual } from 'node:crypto';
+import { createAuthFailureLimiter } from './auth-failure-limiter.js';
 import { createServer } from 'node:http';
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
@@ -211,6 +213,15 @@ function hostHeaderHostname(value) {
       ? value.slice(1, closeBracket)
       : value.split(':')[0];
     if (isIP(rawHostname) === 0 && isIP(hostname) !== 0) return '';
+    // URL parsing is intentionally permissive about DNS labels. Validate the
+    // raw authority's DNS spelling so empty/overlong labels and leading or
+    // trailing hyphens cannot pass as a syntactically valid Host header.
+    if (closeBracket < 0 && isIP(rawHostname) !== 4) {
+      const dnsHostname = rawHostname.endsWith('.') ? rawHostname.slice(0, -1) : rawHostname;
+      if (dnsHostname.length > 253 || dnsHostname.split('.').some((label) =>
+        label.length === 0 || label.length > 63 ||
+        !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i.test(label))) return '';
+    }
     return hostname;
   } catch {
     return '';
@@ -237,6 +248,41 @@ function rejectRequest(outgoing, reason) {
   outgoing.end('Forbidden');
 }
 
+function rejectUnauthorized(outgoing) {
+  log('warn', 'http.request_rejected', { reason: 'proxy_auth_required' });
+  const body = 'Unauthorized';
+  outgoing.writeHead(401, {
+    'www-authenticate': 'Bearer realm="mcp-inspector"',
+    'content-type': 'text/plain; charset=utf-8',
+    'cache-control': 'no-store',
+    'content-length': Buffer.byteLength(body),
+    'x-content-type-options': 'nosniff',
+  });
+  outgoing.end(body);
+}
+
+function rejectRateLimited(outgoing, retryAfterSeconds) {
+  log('warn', 'http.request_rejected', { reason: 'proxy_auth_rate_limited' });
+  const body = 'Too Many Requests';
+  outgoing.writeHead(429, {
+    'retry-after': String(Math.max(1, retryAfterSeconds)),
+    'content-type': 'text/plain; charset=utf-8',
+    'cache-control': 'no-store',
+    'content-length': Buffer.byteLength(body),
+    'x-content-type-options': 'nosniff',
+  });
+  outgoing.end(body);
+}
+
+function hasValidBearerToken(header, expected) {
+  if (typeof header !== 'string' || typeof expected !== 'string') return false;
+  const match = /^Bearer ([A-Za-z0-9._~+\/-]+=*)$/i.exec(header);
+  if (!match) return false;
+  const actual = Buffer.from(match[1], 'utf8');
+  const wanted = Buffer.from(expected, 'utf8');
+  return actual.length === wanted.length && timingSafeEqual(actual, wanted);
+}
+
 function inspectJsonBody(inspector, chunks, totalBytes, maxBytes) {
   if (totalBytes === 0) return;
   if (totalBytes > maxBytes) {
@@ -252,6 +298,7 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
   if (!upstream) throw new Error('--upstream is required for HTTP proxy mode');
   const upstreamUrl = new URL(upstream);
   const configuredToken = process.env.MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN;
+  const configuredProxyToken = process.env.MCP_INSPECTOR_PROXY_BEARER_TOKEN;
   if (configuredToken && !/^[A-Za-z0-9._~+\/-]+=*$/.test(configuredToken)) throw new Error('MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN contains unsupported header characters');
   if (configuredToken && upstreamUrl.protocol !== 'https:' && !isLoopback(upstreamUrl.hostname)) throw new Error('Bearer credentials require HTTPS for non-loopback upstreams');
   if (!['http:', 'https:'].includes(upstreamUrl.protocol)) throw new Error('Upstream must use http:// or https://');
@@ -283,10 +330,22 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
       throw new Error('MCP_INSPECTOR_ALLOWED_ORIGINS must contain canonical http:// or https:// origins without paths or credentials');
     }
   }
+  if (!localOnly) {
+    if (!configuredProxyToken || configuredProxyToken.length < 32) {
+      throw new Error('Non-loopback binds require MCP_INSPECTOR_PROXY_BEARER_TOKEN with at least 32 characters');
+    }
+    if (!/^[A-Za-z0-9._~+\/-]+=*$/.test(configuredProxyToken)) {
+      throw new Error('MCP_INSPECTOR_PROXY_BEARER_TOKEN contains unsupported header characters');
+    }
+    if (allowedOrigins.size === 0) {
+      throw new Error('Non-loopback binds require MCP_INSPECTOR_ALLOWED_ORIGINS with at least one exact origin');
+    }
+  }
 
   const contractRecorder = new ContractRecorder({ path: contractFile, source: contractSource || upstreamUrl.origin, update: updateContract });
   let requestSequence = 0;
   const sessionPendingStores = new Map();
+  const authFailureLimiter = createAuthFailureLimiter();
   const maxSessionStores = 256;
   const configuredMaxBytes = Number(process.env.MCP_INSPECTOR_MAX_FRAME_BYTES ?? 16 * 1024 * 1024);
   const maxInspectBytes = Number.isSafeInteger(configuredMaxBytes) && configuredMaxBytes >= 1024
@@ -294,8 +353,14 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
     : 16 * 1024 * 1024;
 
   const server = createServer((incoming, outgoing) => {
+    const hostHeaderCount = incoming.rawHeaders.reduce((count, name, index) =>
+      index % 2 === 0 && name.toLowerCase() === 'host' ? count + 1 : count, 0);
     const requestHostname = hostHeaderHostname(incoming.headers.host);
-    if (localOnly && (!requestHostname || !isLoopback(requestHostname))) {
+    // HTTP/1.1 requests must have exactly one Host field. Reject duplicate
+    // authorities instead of relying on parser-specific duplicate-header policy.
+    // Loopback listeners also restrict the authority to loopback so DNS aliases
+    // cannot bypass the local-only boundary.
+    if (hostHeaderCount !== 1 || !requestHostname || (localOnly && !isLoopback(requestHostname))) {
       incoming.resume();
       rejectRequest(outgoing, 'invalid_host');
       return;
@@ -334,6 +399,17 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
       });
       outgoing.end();
       return;
+    }
+    if (!localOnly) {
+      const peerAddress = incoming.socket.remoteAddress;
+      if (!hasValidBearerToken(incoming.headers.authorization, configuredProxyToken)) {
+        const retryAfterSeconds = authFailureLimiter.recordFailure(peerAddress);
+        incoming.resume();
+        if (retryAfterSeconds > 0) rejectRateLimited(outgoing, retryAfterSeconds);
+        else rejectUnauthorized(outgoing);
+        return;
+      }
+      authFailureLimiter.clear(peerAddress);
     }
     // This is a reverse proxy for one configured upstream, not a forward
     // proxy. Accept origin-form request targets only; never construct the
@@ -398,6 +474,10 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
     if (sessionState) sessionState.flushPending = (reason) => egressInspector.flushPending(reason);
 
     const headers = filterHopHeaders(incoming.headers);
+    // In remote mode Authorization authenticates the client to this proxy; do
+    // not leak that credential to the upstream. Configure upstream credentials
+    // separately with MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN/UPSTREAM_HEADERS.
+    if (!localOnly) delete headers.authorization;
     Object.assign(headers, configuredHeaders);
     headers.host = upstreamUrl.host;
     headers.connection = 'keep-alive';
