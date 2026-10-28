@@ -5,7 +5,7 @@ import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { lookup as dnsLookup } from 'node:dns';
 import { isIP } from 'node:net';
-import { MessageInspector } from '../protocol/inspector.js';
+import { MessageInspector, readMaxFrameBytes } from '../protocol/inspector.js';
 import { ContractRecorder } from '../contracts/contract.js';
 import { SseObserver } from '../protocol/sse-parser.js';
 import { log, logError } from '../observability/logger.js';
@@ -274,6 +274,29 @@ function rejectRateLimited(outgoing, retryAfterSeconds) {
   outgoing.end(body);
 }
 
+function rejectPayloadTooLarge(outgoing, incoming) {
+  // Capture the socket before ending the response. A client that exceeds the
+  // body cap must not keep an unbounded request stream alive after the 413.
+  const socket = incoming?.socket ?? outgoing.socket;
+  log('warn', 'http.request_rejected', { reason: 'request_body_limit' });
+  const body = 'Payload Too Large';
+  outgoing.writeHead(413, {
+    'connection': 'close',
+    'content-type': 'text/plain; charset=utf-8',
+    'cache-control': 'no-store',
+    'content-length': Buffer.byteLength(body),
+    'x-content-type-options': 'nosniff',
+  });
+  outgoing.once('finish', () => {
+    if (!socket || socket.destroyed) return;
+    // destroySoon flushes the 413 before closing the connection, without
+    // continuing to drain an arbitrarily large or never-ending request body.
+    if (typeof socket.destroySoon === 'function') socket.destroySoon();
+    else socket.destroy();
+  });
+  outgoing.end(body);
+}
+
 function hasValidBearerToken(header, expected) {
   if (typeof header !== 'string' || typeof expected !== 'string') return false;
   const match = /^Bearer ([A-Za-z0-9._~+\/-]+=*)$/i.exec(header);
@@ -292,6 +315,23 @@ function inspectJsonBody(inspector, chunks, totalBytes, maxBytes) {
   void inspector.observeFrame(Buffer.concat(chunks, totalBytes)).catch(() => {
     log('warn', 'rpc.inspection_failed', { transport: 'http' });
   });
+}
+
+function readMaxRequestBytes() {
+  const raw = process.env.MCP_INSPECTOR_MAX_REQUEST_BYTES;
+  if (raw === undefined) return 16 * 1024 * 1024;
+
+  // Do not silently fall back to a larger default when an operator has set an
+  // invalid cap. A typo such as "1023" must stop startup rather than weakening
+  // the configured resource limit without notice.
+  if (!/^\d+$/.test(raw)) {
+    throw new RangeError('MCP_INSPECTOR_MAX_REQUEST_BYTES must be an integer between 1024 and 67108864');
+  }
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1024 || value > 64 * 1024 * 1024) {
+    throw new RangeError('MCP_INSPECTOR_MAX_REQUEST_BYTES must be an integer between 1024 and 67108864');
+  }
+  return value;
 }
 
 export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemote = false, contractFile, contractSource, updateContract = false } = {}) {
@@ -347,10 +387,8 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
   const sessionPendingStores = new Map();
   const authFailureLimiter = createAuthFailureLimiter();
   const maxSessionStores = 256;
-  const configuredMaxBytes = Number(process.env.MCP_INSPECTOR_MAX_FRAME_BYTES ?? 16 * 1024 * 1024);
-  const maxInspectBytes = Number.isSafeInteger(configuredMaxBytes) && configuredMaxBytes >= 1024
-    ? configuredMaxBytes
-    : 16 * 1024 * 1024;
+  const maxInspectBytes = readMaxFrameBytes();
+  const maxRequestBytes = readMaxRequestBytes();
 
   const server = createServer((incoming, outgoing) => {
     const hostHeaderCount = incoming.rawHeaders.reduce((count, name, index) =>
@@ -428,6 +466,17 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
       return;
     }
 
+    // Reject oversized declared bodies before allocating session state or opening
+    // an upstream request. Chunked/streaming bodies are checked again while reading.
+    const declaredLengthHeader = incoming.headers['content-length'];
+    if (declaredLengthHeader !== undefined) {
+      const declaredLength = Number(declaredLengthHeader);
+      if (Number.isSafeInteger(declaredLength) && declaredLength > maxRequestBytes) {
+        rejectPayloadTooLarge(outgoing, incoming);
+        return;
+      }
+    }
+
     // JSON-RPC identifiers are scoped to a connection/session. Modern stateless
     // requests are correlated within each HTTP exchange; legacy session headers
     // provide a stable scope for server-sent follow-up messages.
@@ -484,6 +533,8 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
     const token = process.env.MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN;
     if (token) headers.authorization = `Bearer ${token}`;
     const requestFn = upstreamUrl.protocol === 'https:' ? httpsRequest : httpRequest;
+    let forwardedRequestBytes = 0;
+    let requestTooLarge = false;
     const upstreamReq = requestFn(upstreamUrl, { method: incoming.method, path: targetPath, headers, lookup: safeUpstreamLookup }, (upstreamRes) => {
       const responseHeaders = filterHopHeaders(upstreamRes.headers);
       responseHeaders['cache-control'] = responseHeaders['cache-control'] || 'no-store';
@@ -547,6 +598,7 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
       upstreamReq.destroy(new Error('Upstream inactivity timeout'));
     });
     upstreamReq.on('error', (error) => {
+      if (requestTooLarge) return;
       logError('http.upstream_error', error, { method: incoming.method, path: safePath(incoming.url) });
       if (!outgoing.headersSent) outgoing.writeHead(502, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
       if (!outgoing.destroyed) outgoing.end('MCP upstream unavailable');
@@ -554,18 +606,55 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
     outgoing.on('close', () => {
       if (!upstreamReq.destroyed && !upstreamReq.writableEnded) upstreamReq.destroy();
     });
-    // Register the byte-forwarding pipe before side-channel inspection listeners.
-    incoming.pipe(upstreamReq);
+    // Write each accepted chunk only after checking the cap. A Transform/pipe
+    // listener can still observe a chunk already queued for emission when it is
+    // unpiped; explicit writes guarantee the chunk crossing the limit is never
+    // intentionally forwarded. Preserve backpressure while the upstream drains.
+    incoming.on('data', (chunk) => {
+      if (requestTooLarge) return;
+      forwardedRequestBytes += chunk.length;
+      if (forwardedRequestBytes > maxRequestBytes) {
+        requestTooLarge = true;
+        log('warn', 'http.request_rejected', {
+          reason: 'request_body_limit',
+          bytes: forwardedRequestBytes,
+          max_bytes: maxRequestBytes,
+        });
+        incoming.pause();
+        if (!outgoing.headersSent && !outgoing.destroyed) rejectPayloadTooLarge(outgoing, incoming);
+        else if (!outgoing.destroyed) outgoing.destroy();
+        upstreamReq.destroy(new Error('Request body limit exceeded'));
+        return;
+      }
+      if (!upstreamReq.write(chunk)) incoming.pause();
+    });
+    incoming.on('end', () => {
+      if (!requestTooLarge && !upstreamReq.destroyed && !upstreamReq.writableEnded) upstreamReq.end();
+    });
+    incoming.on('aborted', () => {
+      if (!upstreamReq.destroyed) upstreamReq.destroy(new Error('Client aborted request'));
+    });
+    incoming.on('error', (error) => {
+      if (!upstreamReq.destroyed) upstreamReq.destroy(error);
+    });
+    upstreamReq.on('drain', () => {
+      if (!requestTooLarge && !incoming.destroyed) incoming.resume();
+    });
 
     const requestContentType = String(incoming.headers['content-type'] || '').toLowerCase();
     const requestEncoding = String(incoming.headers['content-encoding'] || 'identity').toLowerCase();
     const requestChunks = [];
-    let requestBytes = 0;
+    let requestInspectBytes = 0;
     let requestInspectDisabled = false;
     if ((requestEncoding === 'identity' || requestEncoding === '') && requestContentType.includes('application/json')) {
       incoming.on('data', (chunk) => {
-        requestBytes += chunk.length;
-        if (requestBytes > maxInspectBytes) {
+        if (requestTooLarge) {
+          requestInspectDisabled = true;
+          requestChunks.length = 0;
+          return;
+        }
+        requestInspectBytes += chunk.length;
+        if (requestInspectBytes > maxInspectBytes) {
           requestInspectDisabled = true;
           requestChunks.length = 0;
         } else if (!requestInspectDisabled) {
@@ -573,8 +662,11 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
         }
       });
       incoming.on('end', () => {
-        if (!requestInspectDisabled) inspectJsonBody(ingressInspector, requestChunks, requestBytes, maxInspectBytes);
-        else log('warn', 'http.inspect_skipped', { reason: 'request_body_limit', bytes: requestBytes, max_bytes: maxInspectBytes });
+        if (!requestTooLarge && !requestInspectDisabled) {
+          inspectJsonBody(ingressInspector, requestChunks, requestInspectBytes, maxInspectBytes);
+        } else if (!requestTooLarge) {
+          log('warn', 'http.inspect_skipped', { reason: 'request_body_limit', bytes: requestInspectBytes, max_bytes: maxInspectBytes });
+        }
       });
     }
 
