@@ -53,3 +53,24 @@ test('shared redaction removes Basic credentials, sensitive headers, and URL use
   assert.match(safe, /Cookie: \[REDACTED\]/);
   assert.match(safe, /https:\/\/\[REDACTED\]@example\.test\/path/);
 });
+
+test('shared redaction removes OAuth codes, state, signatures, and JWT query values', () => {
+  const input = [
+    ['https://idp.example/callback?code=', 'oauth-code-secret'],
+    ['&state=', 'csrf-state-secret'],
+    ['&signature=', 'signed-url-secret'],
+    ['&jwt=', 'jwt-query-secret'],
+    ['&private_key=', 'private-key-secret'],
+  ].join('');
+  const safe = redactSecrets(input);
+
+  assert.doesNotMatch(
+    safe,
+    /oauth-code-secret|csrf-state-secret|signed-url-secret|jwt-query-secret|private-key-secret/,
+  );
+  assert.match(safe, /code=\[REDACTED\]/);
+  assert.match(safe, /state=\[REDACTED\]/);
+  assert.match(safe, /signature=\[REDACTED\]/);
+  assert.match(safe, /jwt=\[REDACTED\]/);
+  assert.match(safe, /private_key=\[REDACTED\]/);
+});
