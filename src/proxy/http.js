@@ -4,7 +4,7 @@ import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { lookup as dnsLookup } from 'node:dns';
 import { isIP } from 'node:net';
-import { MessageInspector } from '../protocol/inspector.js';
+import { MessageInspector, readMaxFrameBytes } from '../protocol/inspector.js';
 import { ContractRecorder } from '../contracts/contract.js';
 import { SseObserver } from '../protocol/sse-parser.js';
 import { log, logError } from '../observability/logger.js';
@@ -411,10 +411,7 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
   const sessionPendingStores = new Map();
   const authFailureLimiter = createAuthFailureLimiter();
   const maxSessionStores = 256;
-  const configuredMaxBytes = Number(process.env.MCP_INSPECTOR_MAX_FRAME_BYTES ?? 16 * 1024 * 1024);
-  const maxInspectBytes = Number.isSafeInteger(configuredMaxBytes) && configuredMaxBytes >= 1024
-    ? configuredMaxBytes
-    : 16 * 1024 * 1024;
+  const maxInspectBytes = readMaxFrameBytes();
   const maxRequestBytes = readMaxRequestBytes();
 
   const server = createServer((incoming, outgoing) => {

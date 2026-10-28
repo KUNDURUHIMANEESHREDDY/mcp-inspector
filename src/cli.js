@@ -61,7 +61,7 @@ Protocol modes:
 Environment:
   OTEL_EXPORTER_OTLP_TRACES_ENDPOINT  Optional OTLP/HTTP trace exporter URL
   OTEL_SERVICE_NAME                   OpenTelemetry service name
-  MCP_INSPECTOR_MAX_FRAME_BYTES       Maximum observed frame size (default 16 MiB)
+  MCP_INSPECTOR_MAX_FRAME_BYTES       Maximum observed frame size (default 16 MiB; valid 1 KiB-64 MiB)
   MCP_INSPECTOR_LOG_LEVEL             debug|info|warn|error (default info)
 `;
 

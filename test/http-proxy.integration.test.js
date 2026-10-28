@@ -890,3 +890,20 @@ test('HTTP proxy rejects invalid request-body limit configuration at startup', {
     else process.env.MCP_INSPECTOR_MAX_REQUEST_BYTES = previousLimit;
   }
 });
+
+test('HTTP proxy rejects invalid frame-size configuration at startup', { skip: !startHttpProxy }, () => {
+  const previous = process.env.MCP_INSPECTOR_MAX_FRAME_BYTES;
+  try {
+    for (const value of ['1023', '67108865', '', 'not-a-number']) {
+      process.env.MCP_INSPECTOR_MAX_FRAME_BYTES = value;
+      assert.throws(
+        () => startHttpProxy({ upstream: 'http://127.0.0.1:9', listen: '127.0.0.1:0' }),
+        /MCP_INSPECTOR_MAX_FRAME_BYTES must be an integer between 1024 and 67108864/,
+        `invalid frame cap should fail proxy startup: ${JSON.stringify(value)}`,
+      );
+    }
+  } finally {
+    if (previous === undefined) delete process.env.MCP_INSPECTOR_MAX_FRAME_BYTES;
+    else process.env.MCP_INSPECTOR_MAX_FRAME_BYTES = previous;
+  }
+});
