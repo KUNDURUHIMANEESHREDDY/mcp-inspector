@@ -162,6 +162,6 @@ test('redacts OAuth credentials in URL fragments while preserving ordinary ancho
   assert.match(safe, /#access_token=\\[REDACTED\\]/);
   assert.match(safe, /&refresh_token=\\[REDACTED\\]/);
   assert.match(safe, /;client_secret=\\[REDACTED\\]/);
-  assert.match(safe, /#\\/callback\\?state=\\[REDACTED\\]&safe=keep-this-value/);
+  assert.ok(safe.includes('#/callback?state=[REDACTED]&safe=keep-this-value'));
   assert.match(safe, /#section=shows/);
 });
