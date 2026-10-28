@@ -4,7 +4,9 @@ const BEARER_CREDENTIAL = /\bBearer\s+[A-Za-z0-9._~+\/-]+=*/gi;
 const BASIC_AUTH_CREDENTIAL = /\b((?:Proxy-)?Authorization\s*:\s*)Basic\s+[A-Za-z0-9+/]+={0,2}/gi;
 const SENSITIVE_HEADER = /\b((?:x-api-key|x-auth-token|api-key|x-amz-security-token|cookie|set-cookie)\s*:\s*)[^\r\n]+/gi;
 const URL_USERINFO = /\b(https?:\/\/)[^\s/@]+@/gi;
-const SENSITIVE_QUERY_PARAMETER = /([?&](?:access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|token|api[_-]?key|secret|password|authorization|session(?:[_-]?id)?|cookie)=)[^&#\s]+/gi;
+// OAuth authorization codes/state, signed URLs, JWTs and private-key query
+// values are credentials too; redact them before telemetry can retain a URL.
+const SENSITIVE_QUERY_PARAMETER = /([?&](?:access[_-]?token|refresh[_-]?token|id[_-]?token|authorization[_-]?code|code|state|client[_-]?secret|signature|sig|jwt|assertion|signed[_-]?request|oauth[_-]?token|token|api[_-]?key|secret|private[_-]?key|password|authorization|session(?:[_-]?id)?|cookie)=)[^&#\s]+/gi;
 const KNOWN_TOKEN_FORMAT = /\b(?:sk-[A-Za-z0-9_-]{16,}|github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{30,})\b/g;
 
 export function redactSecrets(value) {
