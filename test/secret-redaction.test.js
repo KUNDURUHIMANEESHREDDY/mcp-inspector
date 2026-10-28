@@ -18,7 +18,7 @@ test('shared redaction covers supported credential formats and URL parameters', 
     ['AIza', 'SyD1234567890abcdefghijklmnopqrstuv'].join(''),
   ];
   const input = [
-    ['Authorization: Bearer ', 'bearer-example-secret'].join(''),
+    ['Bearer ', 'bearer-example-secret'].join(''),
     ['https://example.test/?access_token=', 'query-access-secret', '&refresh_token=', 'query-refresh-secret'].join(''),
     ...tokens,
   ].join(' ');
@@ -40,13 +40,15 @@ test('shared redaction removes Basic credentials, sensitive headers, and URL use
   const input = [
     ['Authorization: Basic ', 'dXNlcjpwYXNz'].join(''),
     ['Proxy-Authorization: Basic ', 'cHJveHk6cGFzcw=='].join(''),
+    ['Authorization: Token ', 'token-scheme-secret'].join(''),
+    ['Proxy-Authorization: Digest ', 'digest-scheme-secret'].join(''),
     ['X-API-Key: ', 'header-api-key-secret'].join(''),
     ['Cookie: session=', 'cookie-session-secret'].join(''),
     ['https://', 'user:password', '@example.test/path'].join(''),
   ].join('\n');
   const safe = redactSecrets(input);
 
-  assert.doesNotMatch(safe, /dXNlcjpwYXNz|cHJveHk6cGFzcw==|header-api-key-secret|cookie-session-secret|user:password/);
+  assert.doesNotMatch(safe, /dXNlcjpwYXNz|cHJveHk6cGFzcw==|token-scheme-secret|digest-scheme-secret|header-api-key-secret|cookie-session-secret|user:password/);
   assert.match(safe, /Authorization: \[REDACTED\]/);
   assert.match(safe, /Proxy-Authorization: \[REDACTED\]/);
   assert.match(safe, /X-API-Key: \[REDACTED\]/);
