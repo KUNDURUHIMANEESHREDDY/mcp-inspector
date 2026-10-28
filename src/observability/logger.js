@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { redactSecrets } from './redact-secrets.js';
 import { isDashboardActive, publishDashboardEvent } from '../dashboard/event-store.js';
 
 const LEVELS = Object.freeze({ debug: 10, info: 20, warn: 30, error: 40 });
@@ -7,11 +8,7 @@ const threshold = LEVELS[configuredLevel] ?? LEVELS.info;
 const SENSITIVE_KEY = /(authorization|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|private[_-]?key|signing[_-]?key|session(?:[_-]?id)?|password|secret|cookie|prompt|arguments|tool[_-]?result)/i;
 
 export function safeString(value) {
-  return String(value ?? '')
-    .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+=*/gi, 'Bearer [REDACTED]')
-    .replace(/([?&](?:access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|token|api[_-]?key|secret|password|authorization|session(?:[_-]?id)?|cookie)=)[^&#\s]+/gi, '$1[REDACTED]')
-    .replace(/\b(?:sk-[A-Za-z0-9_-]{16,}|github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{30,})\b/g, '[REDACTED]')
-    .slice(0, 240);
+  return redactSecrets(value).slice(0, 240);
 }
 
 function sanitizeValue(key, value, depth = 0) {
