@@ -92,3 +92,15 @@ test('redacts percent-encoded sensitive query names without changing safe parame
   assert.match(safe, /safe%5Fparameter=keep-this-value/);
   assert.match(safe, /access%5Ftoken%ZZ=\[REDACTED\]/);
 });
+
+test('redacts semicolon-delimited credentials while preserving safe query values', () => {
+  const input = [
+    'https://example.test/callback?safe=keep-this-value;access_token=semicolon-access-secret;client%2Dsecret=semicolon-client-secret',
+  ].join('');
+  const safe = redactSecrets(input);
+
+  assert.doesNotMatch(safe, /semicolon-access-secret|semicolon-client-secret/);
+  assert.match(safe, /safe=keep-this-value/);
+  assert.match(safe, /;access_token=\[REDACTED\]/);
+  assert.match(safe, /;client%2Dsecret=\[REDACTED\]/);
+});
