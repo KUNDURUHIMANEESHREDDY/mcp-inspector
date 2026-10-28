@@ -1,7 +1,7 @@
 // Shared credential redaction for logs and dashboard events.
 // Keep the token patterns in one place so observability surfaces cannot drift.
 const BEARER_CREDENTIAL = /\bBearer\s+[A-Za-z0-9._~+\/-]+=*/gi;
-const BASIC_AUTH_CREDENTIAL = /\b((?:Proxy-)?Authorization\s*:\s*)Basic\s+[A-Za-z0-9+/]+={0,2}/gi;
+const AUTHORIZATION_HEADER = /\b((?:Proxy-)?Authorization\s*:\s*)[^\r\n]+/gi;
 const SENSITIVE_HEADER = /\b((?:x-api-key|x-auth-token|api-key|x-amz-security-token|cookie|set-cookie)\s*:\s*)[^\r\n]+/gi;
 const URL_USERINFO = /\b(https?:\/\/)[^\s/@]+@/gi;
 // OAuth authorization codes/state, signed URLs, JWTs and private-key query
