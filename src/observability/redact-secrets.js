@@ -12,6 +12,15 @@ const SENSITIVE_QUERY_PARAMETER_NAME = /^(?:access[_-]?token|refresh[_-]?token|i
 const QUERY_PARAMETER = /([?&;])([^=&#;\s]+)=([^&#;\s]*)/g;
 const KNOWN_TOKEN_FORMAT = /\b(?:sk-[A-Za-z0-9_-]{16,}|github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{30,})\b/g;
 
+function isSensitiveQueryParameterName(name) {
+  // Frameworks commonly normalize bracketed query keys such as
+  // access_token[] or client_secret[0] to their base credential name.
+  // Strip one or more trailing array/index segments before matching so the
+  // same credentials are not exposed merely by changing parameter syntax.
+  const baseName = name.replace(/(?:\[[^\]]*\])+$/, '');
+  return SENSITIVE_QUERY_PARAMETER_NAME.test(baseName);
+}
+
 function redactQueryParameters(value) {
   return value.replace(QUERY_PARAMETER, (match, separator, rawName) => {
     let name = rawName;
@@ -26,7 +35,7 @@ function redactQueryParameters(value) {
       }
       return match;
     }
-    return SENSITIVE_QUERY_PARAMETER_NAME.test(name)
+    return isSensitiveQueryParameterName(name)
       ? `${separator}${rawName}=[REDACTED]`
       : match;
   });
