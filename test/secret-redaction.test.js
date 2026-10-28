@@ -79,10 +79,10 @@ test('shared redaction removes OAuth codes, state, signatures, and JWT query val
 
 test('redacts percent-encoded sensitive query names without changing safe parameters', () => {
   const input = [
-    ['https://example.test/callback?access%5Ftoken=', 'encoded-access-secret'],
-    ['&client%2Dsecret=', 'encoded-client-secret'],
-    ['&safe%5Fparameter=', 'keep-this-value'],
-    ['&access%5Ftoken%ZZ=', 'malformed-encoded-secret'],
+    ['https://example.test/callback?access%5Ftoken=', 'encoded-access-secret'].join(''),
+    ['&client%2Dsecret=', 'encoded-client-secret'].join(''),
+    ['&safe%5Fparameter=', 'keep-this-value'].join(''),
+    ['&access%5Ftoken%ZZ=', 'malformed-encoded-secret'].join(''),
   ].join('');
   const safe = redactSecrets(input);
 
