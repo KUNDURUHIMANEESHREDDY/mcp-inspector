@@ -11,7 +11,7 @@ const SENSITIVE_QUERY_PARAMETER_NAME = /^(?:access[_-]?token|refresh[_-]?token|i
 // credentials can also live in URL fragments, so treat '#', '&', and ';' as
 // parameter boundaries. This redacts token-like fragment parameters without
 // rewriting ordinary fragment identifiers.
-const QUERY_PARAMETER = /([?&;#])([^=&#;\s]+)=([^&#;\s]*)/g;
+const QUERY_PARAMETER = /([?&;#])([^=?&#;\s]+)=([^&#;\s]*)/g;
 const KNOWN_TOKEN_FORMAT = /\b(?:sk-[A-Za-z0-9_-]{16,}|github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{30,})\b/g;
 
 function normalizeQueryParameterName(name) {
