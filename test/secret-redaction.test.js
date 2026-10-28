@@ -159,9 +159,9 @@ test('redacts OAuth credentials in URL fragments while preserving ordinary ancho
     safe,
     /fragment-access-secret|fragment-refresh-secret|fragment-client-secret|fragment-state-secret/,
   );
-  assert.match(safe, /#access_token=\\[REDACTED\\]/);
-  assert.match(safe, /&refresh_token=\\[REDACTED\\]/);
-  assert.match(safe, /;client_secret=\\[REDACTED\\]/);
+  assert.ok(safe.includes('#access_token=[REDACTED]'));
+  assert.ok(safe.includes('&refresh_token=[REDACTED]'));
+  assert.ok(safe.includes(';client_secret=[REDACTED]'));
   assert.ok(safe.includes('#/callback?state=[REDACTED]&safe=keep-this-value'));
-  assert.match(safe, /#section=shows/);
+  assert.ok(safe.includes('#section=shows'));
 });
