@@ -120,3 +120,29 @@ test('redacts bracketed credential query keys while preserving safe arrays', () 
   assert.match(safe, /refresh_token\[primary\]\[value\]=\[REDACTED\]/);
   assert.match(safe, /safe\[0\]=keep-this-value/);
 });
+
+
+test('redacts multiply percent-encoded credential query names without changing safe names', () => {
+  const input = [
+    'https://example.test/callback?access%255Ftoken=double-encoded-access-secret',
+    '&client%252Dsecret=double-encoded-client-secret',
+    '&refresh%25255Ftoken=triple-encoded-refresh-secret',
+    '&access%2525255Ftoken=quadruple-encoded-access-secret',
+    '&access%255Ftoken%ZZ=malformed-double-encoded-secret',
+    '&safe%255Fparameter=keep-this-value',
+    '&stateful=keep-stateful-value',
+  ].join('');
+  const safe = redactSecrets(input);
+
+  assert.doesNotMatch(
+    safe,
+    /double-encoded-access-secret|double-encoded-client-secret|triple-encoded-refresh-secret|quadruple-encoded-access-secret|malformed-double-encoded-secret/,
+  );
+  assert.match(safe, /access%255Ftoken=\[REDACTED\]/);
+  assert.match(safe, /client%252Dsecret=\[REDACTED\]/);
+  assert.match(safe, /refresh%25255Ftoken=\[REDACTED\]/);
+  assert.match(safe, /access%2525255Ftoken=\[REDACTED\]/);
+  assert.match(safe, /access%255Ftoken%ZZ=\[REDACTED\]/);
+  assert.match(safe, /safe%255Fparameter=keep-this-value/);
+  assert.match(safe, /stateful=keep-stateful-value/);
+});
