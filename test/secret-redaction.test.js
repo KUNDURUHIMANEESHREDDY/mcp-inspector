@@ -146,3 +146,22 @@ test('redacts multiply percent-encoded credential query names without changing s
   assert.match(safe, /safe%255Fparameter=keep-this-value/);
   assert.match(safe, /stateful=keep-stateful-value/);
 });
+
+test('redacts OAuth credentials in URL fragments while preserving ordinary anchors', () => {
+  const input = [
+    'https://idp.example/callback#access_token=fragment-access-secret&refresh_token=fragment-refresh-secret;client_secret=fragment-client-secret',
+    'https://app.example/#/callback?state=fragment-state-secret&safe=keep-this-value',
+    'https://example.test/page#section=shows',
+  ].join(' ');
+  const safe = redactSecrets(input);
+
+  assert.doesNotMatch(
+    safe,
+    /fragment-access-secret|fragment-refresh-secret|fragment-client-secret|fragment-state-secret/,
+  );
+  assert.match(safe, /#access_token=\\[REDACTED\\]/);
+  assert.match(safe, /&refresh_token=\\[REDACTED\\]/);
+  assert.match(safe, /;client_secret=\\[REDACTED\\]/);
+  assert.match(safe, /#\\/callback\\?state=\\[REDACTED\\]&safe=keep-this-value/);
+  assert.match(safe, /#section=shows/);
+});
