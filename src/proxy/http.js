@@ -1,4 +1,5 @@
 import { timingSafeEqual } from 'node:crypto';
+import { createAuthFailureLimiter } from './auth-failure-limiter.js';
 import { createServer } from 'node:http';
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
@@ -271,31 +272,6 @@ function rejectRateLimited(outgoing, retryAfterSeconds) {
     'x-content-type-options': 'nosniff',
   });
   outgoing.end(body);
-}
-
-// Throttle failed credentials only. Use the direct socket peer rather than
-// X-Forwarded-For, which is client-controlled unless a trusted gateway parses it.
-// The map is bounded so spoofed source addresses cannot grow memory without limit.
-function createAuthFailureLimiter({ maxAttempts = 10, windowMs = 60_000, maxEntries = 4096 } = {}) {
-  const attempts = new Map();
-  const keyFor = (address) => typeof address === 'string' && address ? address : 'unknown';
-  return {
-    recordFailure(address) {
-      const key = keyFor(address);
-      const now = Date.now();
-      let entry = attempts.get(key);
-      if (!entry || now - entry.startedAt >= windowMs) entry = { startedAt: now, count: 0 };
-      entry.count += 1;
-      attempts.delete(key);
-      attempts.set(key, entry);
-      while (attempts.size > maxEntries) attempts.delete(attempts.keys().next().value);
-      if (entry.count <= maxAttempts) return 0;
-      return Math.max(1, Math.ceil((windowMs - (now - entry.startedAt)) / 1000));
-    },
-    clear(address) {
-      attempts.delete(keyFor(address));
-    },
-  };
 }
 
 function hasValidBearerToken(header, expected) {
