@@ -536,6 +536,8 @@ test('upstream DNS address policy blocks private/reserved ranges unless explicit
     '2001:0db8:0000:0000:0000:0000:0000:0001',
     '2001:0001:0000:0000:0000:0000:0000:0001',
     '3fff:0000:0000:0000:0000:0000:0000:0001',
+    '2001:20::1',
+    '2001:0020:0000:0000:0000:0000:0000:0001',
     '2002:0808:0808:0000:0000:0000:0000:0001',
   ]) {
     assert.equal(isRestrictedUpstreamAddress(address), true, 'restricted: ' + address);
