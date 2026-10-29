@@ -146,3 +146,39 @@ test('redacts multiply percent-encoded credential query names without changing s
   assert.match(safe, /safe%255Fparameter=keep-this-value/);
   assert.match(safe, /stateful=keep-stateful-value/);
 });
+
+test('redacts OAuth credentials in URL fragments while preserving ordinary anchors', () => {
+  const input = [
+    'https://idp.example/callback#access_token=fragment-access-secret&refresh_token=fragment-refresh-secret;client_secret=fragment-client-secret',
+    'https://idp.example/callback#access%255Ftoken=double-encoded-fragment-secret',
+    'https://idp.example/callback#access%255Ftoken%ZZ=malformed-fragment-secret',
+    'https://app.example/#/callback?state=fragment-state-secret&safe=keep-this-value',
+    'https://example.test/page#section=shows',
+  ].join(' ');
+  const safe = redactSecrets(input);
+
+  assert.doesNotMatch(
+    safe,
+    /fragment-access-secret|fragment-refresh-secret|fragment-client-secret|fragment-state-secret|double-encoded-fragment-secret|malformed-fragment-secret/,
+  );
+  assert.ok(safe.includes('#access_token=[REDACTED]'));
+  assert.ok(safe.includes('#access%255Ftoken=[REDACTED]'));
+  assert.ok(safe.includes('#access%255Ftoken%ZZ=[REDACTED]'));
+  assert.ok(safe.includes('&refresh_token=[REDACTED]'));
+  assert.ok(safe.includes(';client_secret=[REDACTED]'));
+  assert.ok(safe.includes('#/callback?state=[REDACTED]&safe=keep-this-value'));
+  assert.ok(safe.includes('#section=shows'));
+});
+
+test('redacts deeply encoded OAuth fragment keys after the decode bound', () => {
+  // A telemetry wrapper may encode a URL repeatedly. The bounded decoder must
+  // still fail closed without needing an attacker-controlled unbounded loop.
+  let encodedName = 'access%5Ftoken';
+  for (let depth = 0; depth < 12; depth += 1) {
+    encodedName = encodedName.replace(/%/g, '%25');
+  }
+  const secret = 'deeply-encoded-fragment-secret';
+  const safe = redactSecrets(`https://idp.example/callback#${encodedName}=${secret}`);
+  assert.doesNotMatch(safe, new RegExp(secret));
+  assert.ok(safe.includes(`${encodedName}=[REDACTED]`));
+});
