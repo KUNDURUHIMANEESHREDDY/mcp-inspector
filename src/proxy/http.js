@@ -142,7 +142,22 @@ export function isLoopbackAddress(address) {
   const clean = String(address || '').toLowerCase().replace(/^\[|\]$/g, '').split('%')[0];
   const family = isIP(clean);
   if (family === 4) return inIpv4Range(clean, '127.0.0.0', 8);
-  if (family === 6) return ipv6ToBigInt(clean) === 1n;
+  if (family === 6) {
+    const value = ipv6ToBigInt(clean);
+    if (value === 1n) return true;
+    // IPv4-mapped loopback answers are loopback too, but only when the
+    // embedded IPv4 address belongs to 127.0.0.0/8.
+    if ((value >> 32n) === 0xffffn) {
+      const embedded = Number(value & 0xffffffffn);
+      const ipv4 = [
+        (embedded >>> 24) & 255,
+        (embedded >>> 16) & 255,
+        (embedded >>> 8) & 255,
+        embedded & 255,
+      ].join('.');
+      return inIpv4Range(ipv4, '127.0.0.0', 8);
+    }
+  }
   return false;
 }
 
