@@ -169,3 +169,16 @@ test('redacts OAuth credentials in URL fragments while preserving ordinary ancho
   assert.ok(safe.includes('#/callback?state=[REDACTED]&safe=keep-this-value'));
   assert.ok(safe.includes('#section=shows'));
 });
+
+test('redacts deeply encoded OAuth fragment keys after the decode bound', () => {
+  // A telemetry wrapper may encode a URL repeatedly. The bounded decoder must
+  // still fail closed without needing an attacker-controlled unbounded loop.
+  let encodedName = 'access%5Ftoken';
+  for (let depth = 0; depth < 12; depth += 1) {
+    encodedName = encodedName.replace(/%/g, '%25');
+  }
+  const secret = 'deeply-encoded-fragment-secret';
+  const safe = redactSecrets(`https://idp.example/callback#${encodedName}=${secret}`);
+  assert.doesNotMatch(safe, new RegExp(secret));
+  assert.ok(safe.includes(`${encodedName}=[REDACTED]`));
+});
