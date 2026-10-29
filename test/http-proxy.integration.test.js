@@ -4,8 +4,9 @@ import { createServer, request as httpRequest } from 'node:http';
 import { once } from 'node:events';
 import { connect as netConnect } from 'node:net';
 let startHttpProxy;
+let createSafeUpstreamLookup;
 try {
-  ({ startHttpProxy } = await import('../src/proxy/http.js'));
+  ({ startHttpProxy, createSafeUpstreamLookup } = await import('../src/proxy/http.js'));
 } catch {
   // Dependency-backed HTTP integration tests run in CI after npm install.
 }
@@ -314,6 +315,35 @@ test('upstream DNS address policy blocks private/reserved ranges unless explicit
   for (const address of ['8.8.8.8', '1.1.1.1', '2606:4700:4700::1111', '2606:4700:4700:0000:0000:0000:0000:1111']) {
     assert.equal(isRestrictedUpstreamAddress(address), false, 'public: ' + address);
   }
+});
+  
+test('localhost upstream DNS answers must remain inside loopback', { skip: !createSafeUpstreamLookup }, async () => {
+  const loopbackAnswers = [
+    { address: '127.0.0.1', family: 4 },
+    { address: '::1', family: 6 },
+  ];
+  const stubLookup = (answers) => (_hostname, _options, callback) => callback(null, answers);
+  const resolveWith = (hostname, answers, allowlist = new Set()) => new Promise((resolve) => {
+    createSafeUpstreamLookup(allowlist, stubLookup(answers))(hostname, { all: true }, (...args) => resolve(args));
+  });
+
+  const local = await resolveWith('localhost', loopbackAnswers);
+  assert.equal(local[0], null);
+  assert.deepEqual(local[1], loopbackAnswers);
+
+  for (const answers of [
+    [{ address: '8.8.8.8', family: 4 }],
+    [{ address: '127.0.0.1', family: 4 }, { address: '8.8.8.8', family: 4 }],
+  ]) {
+    const result = await resolveWith('localhost', answers);
+    assert.equal(result[0]?.code, 'ERR_MCP_INSPECTOR_UPSTREAM_ADDRESS_BLOCKED');
+  }
+
+  // Explicit operator allowlisting remains the supported way to trust a
+  // private upstream hostname; the localhost exception is narrower.
+  const trusted = await resolveWith('trusted.internal', [{ address: '192.168.1.10', family: 4 }], new Set(['trusted.internal']));
+  assert.equal(trusted[0], null);
+  assert.deepEqual(trusted[1], [{ address: '192.168.1.10', family: 4 }]);
 });
 
 test('HTTP proxy forwards validated configured upstream headers without logging their values', { skip: !startHttpProxy }, async (t) => {
