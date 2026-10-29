@@ -328,13 +328,18 @@ test('localhost upstream DNS answers must remain inside loopback', { skip: !crea
     createSafeUpstreamLookup(allowlist, stubLookup(answers))(hostname, { all: true }, (...args) => resolve(args));
   });
 
-  const local = await resolveWith('localhost', loopbackAnswers);
-  assert.equal(local[0], null);
-  assert.deepEqual(local[1], loopbackAnswers);
+  // Hostname normalization must apply before the special-use exception.
+  for (const hostname of ['localhost', 'LOCALHOST.']) {
+    const local = await resolveWith(hostname, loopbackAnswers);
+    assert.equal(local[0], null);
+    assert.deepEqual(local[1], loopbackAnswers);
+  }
 
   for (const answers of [
     [{ address: '8.8.8.8', family: 4 }],
+    [{ address: '::ffff:8.8.8.8', family: 6 }],
     [{ address: '127.0.0.1', family: 4 }, { address: '8.8.8.8', family: 4 }],
+    [{ address: '::1', family: 6 }, { address: '::ffff:8.8.8.8', family: 6 }],
   ]) {
     const result = await resolveWith('localhost', answers);
     assert.equal(result[0]?.code, 'ERR_MCP_INSPECTOR_UPSTREAM_ADDRESS_BLOCKED');
