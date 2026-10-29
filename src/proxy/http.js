@@ -73,7 +73,6 @@ export function isRestrictedUpstreamAddress(address) {
     if (!ipv6InRange(value, '2000::', 3)) return true;
     const specialUseRanges = [
       ['2001::', 23],       // IETF protocol assignments
-      ['2001:20::', 28],    // ORCHIDv2 identifiers (RFC 7343), not globally routable
       ['2001:db8::', 32],   // Documentation
       ['2002::', 16],       // Deprecated 6to4
       ['3fff::', 20],       // Documentation
