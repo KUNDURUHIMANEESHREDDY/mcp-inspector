@@ -321,6 +321,7 @@ test('localhost upstream DNS answers must remain inside loopback', { skip: !crea
   const loopbackAnswers = [
     { address: '127.0.0.1', family: 4 },
     { address: '::1', family: 6 },
+    { address: '::ffff:127.0.0.1', family: 6 },
   ];
   const stubLookup = (answers) => (_hostname, _options, callback) => callback(null, answers);
   const resolveWith = (hostname, answers, allowlist = new Set()) => new Promise((resolve) => {
