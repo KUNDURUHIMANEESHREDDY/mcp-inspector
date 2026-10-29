@@ -138,14 +138,33 @@ function parseAllowedUpstreamHosts(raw) {
   return hosts;
 }
 
-function createSafeUpstreamLookup(allowedHosts) {
+export function isLoopbackAddress(address) {
+  const clean = String(address || '').toLowerCase().replace(/^\[|\]$/g, '').split('%')[0];
+  const family = isIP(clean);
+  if (family === 4) return inIpv4Range(clean, '127.0.0.0', 8);
+  if (family === 6) return ipv6ToBigInt(clean) === 1n;
+  return false;
+}
+
+export function createSafeUpstreamLookup(allowedHosts, lookup = dnsLookup) {
   return (hostname, options, callback) => {
     const lookupOptions = typeof options === 'object' && options !== null ? options : {};
     const done = typeof options === 'function' ? options : callback;
-    dnsLookup(hostname, { all: true, verbatim: true }, (error, addresses) => {
+    lookup(hostname, { all: true, verbatim: true }, (error, addresses) => {
       if (error) return done(error);
       if (!Array.isArray(addresses) || addresses.length === 0) return done(new Error('Upstream host did not resolve'));
       const normalized = normalizeHostname(hostname);
+
+      // "localhost" is a special-use name, not a blanket trust grant for any
+      // address returned by a misconfigured hosts file or resolver. Require
+      // every answer to remain loopback before bypassing the private-address
+      // filter; otherwise a public answer could turn localhost into an SSRF hop.
+      if (normalized === 'localhost' && addresses.some((item) => !isLoopbackAddress(item.address))) {
+        const blocked = new Error('Localhost resolved outside the loopback address range');
+        blocked.code = 'ERR_MCP_INSPECTOR_UPSTREAM_ADDRESS_BLOCKED';
+        return done(blocked);
+      }
+
       const explicitlyTrusted = isLoopback(normalized) || allowedHosts.has(normalized);
       if (!explicitlyTrusted && addresses.some((item) => isRestrictedUpstreamAddress(item.address))) {
         const blocked = new Error('Upstream hostname resolved to a private or special-use address; add its exact hostname to MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS only if trusted');
