@@ -26,9 +26,14 @@ function isSensitiveQueryParameterName(name) {
 }
 
 function resemblesSensitiveEncodedQueryName(name) {
-  // Used only when decoding fails or a bounded decode depth is exhausted.
-  // The %25* form also catches credentials nested behind repeated encoding.
-  return /(?:access|refresh|id|client|api|private|oauth)(?:(?:%25)*%?(?:5f|2d)|[_-])?(?:%25)*(?:token|secret|key)|^(?:code|state|signature|sig|jwt|assertion|password|authorization|cookie|session)/i.test(name);
+  // Used only when decoding fails or the bounded decoder is exhausted.
+  // Repeated encoding of "%5F" is shaped like "%2525255F", not a repetition
+  // of the literal "%25" token. Detect nested encoding plus a credential
+  // marker so a deep-encoded key cannot bypass redaction at the depth limit.
+  const nestedEncoding = /%(?:25)+/i.test(name);
+  const credentialMarker =
+    /(?:^|[^a-z0-9])(?:access|refresh|id|client|api|private|oauth|token|secret|key|code|state|signature|sig|jwt|assertion|password|authorization|cookie|session)(?:$|[^a-z0-9])/i.test(name);
+  return nestedEncoding && credentialMarker;
 }
 
 function redactQueryParameters(value) {
