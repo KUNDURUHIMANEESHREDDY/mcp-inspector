@@ -61,3 +61,12 @@ test('stderr structured logs redact ID/session/private keys and common credentia
   assert.match(output, /"private_key":"\[REDACTED\]"/);
   assert.match(output, /id_token=\[REDACTED\]&session_id=\[REDACTED\]/);
 });
+
+
+test('URL userinfo redaction removes malformed raw at-sign suffixes without leaking credentials', async () => {
+  const { redactSecrets } = await import('../src/observability/redact-secrets.js');
+  const input = 'connect https://alice:p@ss@issuer.example/path?keep=yes';
+  const output = redactSecrets(input);
+  assert.doesNotMatch(output, /alice|p@ss|ss@issuer/);
+  assert.match(output, /https:\/\/\[REDACTED\]@issuer\.example\/path\?keep=yes/);
+});
