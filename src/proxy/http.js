@@ -26,7 +26,11 @@ function normalizeHostname(host) {
 }
 
 function isLoopback(host) {
-  return ['127.0.0.1', '::1', 'localhost'].includes(normalizeHostname(host));
+  const normalized = normalizeHostname(host);
+  // The complete 127.0.0.0/8 block is IPv4 loopback, not only 127.0.0.1.
+  // Reuse the address classifier so binds, Host checks, Origins and upstream
+  // trust decisions apply the same IPv4/IPv6-mapped loopback semantics.
+  return normalized === 'localhost' || isLoopbackAddress(normalized);
 }
 
 function inIpv4Range(address, network, prefix) {
