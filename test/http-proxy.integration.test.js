@@ -5,11 +5,20 @@ import { once } from 'node:events';
 import { connect as netConnect } from 'node:net';
 let startHttpProxy;
 let createSafeUpstreamLookup;
+let isLoopbackAddress;
 try {
-  ({ startHttpProxy, createSafeUpstreamLookup } = await import('../src/proxy/http.js'));
+  ({ startHttpProxy, createSafeUpstreamLookup, isLoopbackAddress } = await import('../src/proxy/http.js'));
 } catch {
   // Dependency-backed HTTP integration tests run in CI after npm install.
 }
+
+test('loopback classifier handles IPv4-mapped IPv6 consistently', { skip: !isLoopbackAddress }, () => {
+  assert.equal(isLoopbackAddress('127.0.0.2'), true);
+  assert.equal(isLoopbackAddress('::1'), true);
+  assert.equal(isLoopbackAddress('::ffff:127.0.0.2'), true);
+  assert.equal(isLoopbackAddress('::ffff:192.0.2.1'), false);
+  assert.equal(isLoopbackAddress('192.0.2.1'), false);
+});
 
 test('HTTP proxy stays loopback-only by default and rejects embedded credentials', { skip: !startHttpProxy }, () => {
   assert.throws(() => startHttpProxy({ upstream: 'http://user:pass@127.0.0.1:3000' }), /Credentials in upstream URLs are not allowed/);
