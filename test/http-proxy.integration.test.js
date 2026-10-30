@@ -15,6 +15,49 @@ test('HTTP proxy stays loopback-only by default and rejects embedded credentials
   assert.throws(() => startHttpProxy({ upstream: 'http://user:pass@127.0.0.1:3000' }), /Credentials in upstream URLs are not allowed/);
   assert.throws(() => startHttpProxy({ upstream: 'http://127.0.0.1:3000', listen: '0.0.0.0:9900' }), /Non-loopback binds require --allow-remote/);
 });
+ 
+test('HTTP proxy treats the complete IPv4 loopback range as local', { skip: !startHttpProxy }, async (t) => {
+  const upstream = createServer((request, response) => {
+    request.resume();
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end('{"jsonrpc":"2.0","id":1,"result":{"ok":true}}');
+  });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  const upstreamAddress = upstream.address();
+  const proxy = startHttpProxy({
+    upstream: `http://127.0.0.1:${upstreamAddress.port}`,
+    listen: '127.0.0.2:0',
+  });
+  if (!proxy.server.listening) await once(proxy.server, 'listening');
+  const proxyAddress = proxy.server.address();
+  t.after(async () => {
+    await proxy.close();
+    await new Promise((resolve) => upstream.close(resolve));
+  });
+
+  assert.equal(proxyAddress.address, '127.0.0.2');
+  const status = await new Promise((resolve, reject) => {
+    const request = httpRequest({
+      hostname: '127.0.0.2',
+      port: proxyAddress.port,
+      path: '/mcp',
+      method: 'POST',
+      headers: {
+        host: `127.0.0.2:${proxyAddress.port}`,
+        origin: 'http://127.0.0.2:3000',
+        'content-type': 'application/json',
+      },
+    }, (response) => {
+      response.resume();
+      response.on('end', () => resolve(response.statusCode));
+      response.on('error', reject);
+    });
+    request.on('error', reject);
+    request.end('{"jsonrpc":"2.0","id":1,"method":"ping"}');
+  });
+  assert.equal(status, 200, '127.0.0.2 bind, Host and Origin must be treated as loopback');
+});
 
 test('HTTP proxy rejects empty entries in the upstream host allowlist', { skip: !startHttpProxy }, async () => {
   const previous = process.env.MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS;
