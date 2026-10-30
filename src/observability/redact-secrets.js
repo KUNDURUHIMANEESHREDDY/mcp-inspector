@@ -3,7 +3,10 @@
 const BEARER_CREDENTIAL = /\bBearer\s+[A-Za-z0-9._~+\/-]+=*/gi;
 const AUTHORIZATION_HEADER = /\b((?:Proxy-)?Authorization\s*:\s*)[^\r\n]+/gi;
 const SENSITIVE_HEADER = /\b((?:x-api-key|x-auth-token|api-key|x-amz-security-token|cookie|set-cookie)\s*:\s*)[^\r\n]+/gi;
-const URL_USERINFO = /\b(https?:\/\/)[^\s/@]+@/gi;
+// Consume the complete authority userinfo through its final @ delimiter.
+// A malformed raw '@' inside a password is accepted and percent-encoded by
+// WHATWG URL parsers; stopping at the first '@' would leak the remaining suffix.
+const URL_USERINFO = /\b(https?:\/\/)[^\s/?#]*@/gi;
 // OAuth authorization codes/state, signed URLs, JWTs and private-key query
 // values are credentials too; redact them before telemetry can retain a URL.
 const SENSITIVE_QUERY_PARAMETER_NAME = /^(?:access[_-]?token|refresh[_-]?token|id[_-]?token|authorization[_-]?code|code|state|client[_-]?secret|signature|sig|jwt|assertion|signed[_-]?request|oauth[_-]?token|token|api[_-]?key|secret|private[_-]?key|password|authorization|session(?:[_-]?id)?|cookie)$/i;
