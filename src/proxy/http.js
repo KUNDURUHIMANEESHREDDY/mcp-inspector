@@ -143,10 +143,14 @@ function parseAllowedUpstreamHosts(raw) {
 }
 
 export function isLoopbackAddress(address) {
-  const clean = String(address || '').toLowerCase().replace(/^\[|\]$/g, '').split('%')[0];
-  const family = isIP(clean);
-  if (family === 4) return inIpv4Range(clean, '127.0.0.0', 8);
+  // Let Node validate the complete literal first. Zone identifiers are valid
+  // for IPv6, but accepting them on IPv4 would turn malformed inputs such as
+  // "127.0.0.1%lo0" into trusted loopback addresses.
+  const raw = String(address || '').toLowerCase().replace(/^\[|\]$/g, '');
+  const family = isIP(raw);
+  if (family === 4) return inIpv4Range(raw, '127.0.0.0', 8);
   if (family === 6) {
+    const clean = raw.split('%', 1)[0];
     const value = ipv6ToBigInt(clean);
     if (value === 1n) return true;
     // IPv4-mapped loopback answers are loopback too, but only when the
