@@ -364,6 +364,8 @@ test('upstream DNS address policy blocks private/reserved ranges unless explicit
     '224.0.0.1', '::1', 'fc00::1', 'fe80::1', 'fe80::1%eth0', '::ffff:7f00:1',
     // IPv4 literals cannot carry IPv6 zone identifiers; malformed resolver answers fail closed.
     '127.0.0.1%lo0', '8.8.8.8%lo0', '8.8.8.8%25lo0',
+    // DNS lookup answers are bare IP literals; bracketed or half-bracketed forms fail closed.
+    '[8.8.8.8]', '[8.8.8.8', '8.8.8.8]', '[2606:4700:4700::1111]',
     // Equivalent expanded forms must receive the same classification.
     '0:0:0:0:0:ffff:7f00:1',
     '2001:0db8:0000:0000:0000:0000:0000:0001',
