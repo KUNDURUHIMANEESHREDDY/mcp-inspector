@@ -48,7 +48,7 @@ export function log(level, event, fields = {}) {
   // The protocol channel is stdout for stdio MCP servers. Diagnostics must never
   // contaminate it, so every log record is written to stderr only.
   try {
-    process.stderr.write(`${JSON.stringify(record)}\\n`);
+    process.stderr.write(JSON.stringify(record) + '\n');
   } catch {
     // A broken diagnostics pipe must not break the protocol forwarding path.
   }
@@ -60,14 +60,14 @@ export function errorKind(error) {
 }
 
 export function requestKey(id) {
-  if (typeof id === 'number') return `number:${id}`;
+  if (typeof id === 'number') return \`number:\${id}\`;
   // String request IDs are attacker-controlled metadata. Keep correlation exact
   // without copying potentially sensitive or enormous values into logs/spans.
   if (typeof id === 'string') {
     const digest = createHash('sha256').update(id).digest('hex').slice(0, 20);
-    return `string:sha256:${digest}`;
+    return \`string:sha256:\${digest}\`;
   }
-  return `${typeof id}:${String(id).slice(0, 64)}`;
+  return \`\${typeof id}:\${String(id).slice(0, 64)}\`;
 }
 
 export function logError(event, error, fields = {}) {
