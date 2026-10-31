@@ -75,7 +75,7 @@ test('HTTP proxy treats the complete IPv4 loopback range as local', { skip: !sta
   assert.equal(status, 200, '127.0.0.2 bind, Host and Origin must be treated as loopback');
 });
 
-test('HTTP proxy rejects empty entries in the upstream host allowlist', { skip: !startHttpProxy }, async () => {
+test('HTTP proxy rejects empty and malformed bracket entries in the upstream host allowlist', { skip: !startHttpProxy }, async () => {
   const previous = process.env.MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS;
   let proxy;
   try {
@@ -87,7 +87,15 @@ test('HTTP proxy rejects empty entries in the upstream host allowlist', { skip: 
         `reject malformed allowlist: ${JSON.stringify(value)}`,
       );
     }
-    process.env.MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS = '127.0.0.1,example.com';
+    for (const value of ['[127.0.0.1', '127.0.0.1]', '[127.0.0.1]', '[example.com]', '[example.com', 'example.com]']) {
+      process.env.MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS = value;
+      assert.throws(
+        () => startHttpProxy({ upstream: 'http://127.0.0.1:3000' }),
+        /MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS must be a comma-separated exact hostname\/IP allowlist/,
+        `reject malformed bracketed allowlist entry: ${JSON.stringify(value)}`,
+      );
+    }
+    process.env.MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS = '[::1],example.com';
     proxy = startHttpProxy({ upstream: 'http://127.0.0.1:3000', listen: '127.0.0.1:0' });
     if (!proxy.server.listening) await once(proxy.server, 'listening');
   } finally {

@@ -22,7 +22,14 @@ function filterHopHeaders(headers) {
 }
 
 function normalizeHostname(host) {
-  return String(host || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  const value = String(host || '').toLowerCase();
+  if (value.startsWith('[') || value.endsWith(']')) {
+    if (!value.startsWith('[') || !value.endsWith(']')) return '';
+    const address = value.slice(1, -1);
+    return isIP(address) === 6 ? address : '';
+  }
+  if (value.includes('[') || value.includes(']')) return '';
+  return value.replace(/\.$/, '');
 }
 
 function isLoopback(host) {
