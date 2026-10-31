@@ -14,6 +14,8 @@ try {
 
 test('loopback classifier handles IPv4-mapped IPv6 consistently', { skip: !isLoopbackAddress }, () => {
   assert.equal(isLoopbackAddress('127.0.0.2'), true);
+  assert.equal(isLoopbackAddress('127.0.0.1%lo0'), false, 'IPv4 literals cannot carry IPv6 zone identifiers');
+  assert.equal(isLoopbackAddress('127.0.0.1%25lo0'), false, 'percent-encoded IPv4 zone suffixes are not loopback');
   assert.equal(isLoopbackAddress('127.255.255.255'), true, 'the upper edge of 127.0.0.0/8 is loopback');
   assert.equal(isLoopbackAddress('126.255.255.255'), false, 'the address immediately below the loopback block is not loopback');
   assert.equal(isLoopbackAddress('128.0.0.1'), false, 'the address immediately above the loopback block is not loopback');
