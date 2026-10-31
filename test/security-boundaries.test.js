@@ -83,3 +83,20 @@ test('URL userinfo redaction covers WHATWG backslash and slashless special-schem
     assert.match(output, /issuer\.example\/path/);
   }
 });
+
+
+test('URL userinfo redaction covers WHATWG whitespace normalization inside credentials', async () => {
+  const { redactSecrets } = await import('../src/observability/redact-secrets.js');
+  const inputs = [
+    'https://alice:pa\nss@issuer.example/path',
+    'https://alice:pa\tss@issuer.example/path',
+    'https://alice:pa\rss@issuer.example/path',
+    'https://alice:pa ss@issuer.example/path',
+  ];
+  for (const input of inputs) {
+    assert.notEqual(new URL(input).password, '');
+    const output = redactSecrets('connect ' + input);
+    assert.doesNotMatch(output, /alice|pass|pa%20ss/);
+    assert.match(output, /https:\/\/\[REDACTED\]@issuer\.example\/path/);
+  }
+});

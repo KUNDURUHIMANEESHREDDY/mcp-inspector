@@ -7,7 +7,10 @@ const SENSITIVE_HEADER = /\b((?:x-api-key|x-auth-token|api-key|x-amz-security-to
 // slashless forms such as "https:user:pass@host". Capture the scheme separator
 // and consume the complete authority userinfo through its final @ delimiter.
 // This also handles malformed raw '@' characters inside a password.
-const URL_USERINFO = /\b(https?:[\\/]*)([^\s/?#\\]*)@/gi;
+// WHATWG special-scheme parsing strips ASCII tabs/newlines and percent-encodes
+// spaces in userinfo. Keep those characters inside the authority match so a
+// URL accepted by new URL() cannot leak a suffix of its password.
+const URL_USERINFO = /\b(https?:[\\/]*)([^/?#\\]*)@/gi;
 // OAuth authorization codes/state, signed URLs, JWTs and private-key query
 // values are credentials too; redact them before telemetry can retain a URL.
 const SENSITIVE_QUERY_PARAMETER_NAME = /^(?:access[_-]?token|refresh[_-]?token|id[_-]?token|authorization[_-]?code|code|state|client[_-]?secret|signature|sig|jwt|assertion|signed[_-]?request|oauth[_-]?token|token|api[_-]?key|secret|private[_-]?key|password|authorization|session(?:[_-]?id)?|cookie)$/i;
