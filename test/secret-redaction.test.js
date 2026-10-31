@@ -182,3 +182,20 @@ test('redacts deeply encoded OAuth fragment keys after the decode bound', () => 
   assert.doesNotMatch(safe, new RegExp(secret));
   assert.ok(safe.includes(`${encodedName}=[REDACTED]`));
 });
+
+
+test('URL userinfo redaction covers WHATWG tab/newline normalization inside the scheme', () => {
+  const inputs = [
+    'ht\ntps://alice:scheme-newline-secret@issuer.example/path',
+    'h\nttps://alice:scheme-middle-newline-secret@issuer.example/path',
+    'https:\n//alice:separator-newline-secret@issuer.example/path',
+    'https:/\n/alice:slash-separator-newline-secret@issuer.example/path',
+    'https:\t//alice:separator-tab-secret@issuer.example/path',
+  ];
+  for (const input of inputs) {
+    assert.notEqual(new URL(input).password, '');
+    const output = redactSecrets('connect ' + input);
+    assert.doesNotMatch(output, /alice|scheme-newline-secret|scheme-middle-newline-secret|separator-newline-secret|slash-separator-newline-secret|separator-tab-secret/);
+    assert.match(output, /\[REDACTED\]@issuer\.example\/path/);
+  }
+});
