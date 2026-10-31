@@ -60,14 +60,14 @@ export function errorKind(error) {
 }
 
 export function requestKey(id) {
-  if (typeof id === 'number') return \`number:\${id}\`;
+  if (typeof id === 'number') return 'number:' + id;
   // String request IDs are attacker-controlled metadata. Keep correlation exact
   // without copying potentially sensitive or enormous values into logs/spans.
   if (typeof id === 'string') {
     const digest = createHash('sha256').update(id).digest('hex').slice(0, 20);
-    return \`string:sha256:\${digest}\`;
+    return 'string:sha256:' + digest;
   }
-  return \`\${typeof id}:\${String(id).slice(0, 64)}\`;
+  return typeof id + ':' + String(id).slice(0, 64);
 }
 
 export function logError(event, error, fields = {}) {
