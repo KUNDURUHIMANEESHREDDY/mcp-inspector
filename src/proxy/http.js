@@ -42,7 +42,7 @@ function inIpv4Range(address, network, prefix) {
 
 /** True for special-use / private addresses which must not be targeted implicitly. */
 export function isRestrictedUpstreamAddress(address) {
-  const clean = String(address || '').toLowerCase().replace(/^\[|\]$/g, '').split('%')[0];
+  const clean = String(address || '').toLowerCase().replace(/^\[|\]$/g, '');
   const family = isIP(clean);
   if (family === 4) {
     const ranges = [
