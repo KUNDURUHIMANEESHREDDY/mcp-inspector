@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { redactSecrets } from '../observability/redact-secrets.js';
 import { EventEmitter } from 'node:events';
 
 const MAX_EVENTS = 2000;
@@ -18,12 +19,7 @@ const SAFE_FIELDS = new Set([
 ]);
 
 function safeText(value, limit = 160) {
-  return String(value ?? '')
-    .replace(/[\u0000-\u001f\u007f]/g, ' ')
-    .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+=*/gi, 'Bearer [REDACTED]')
-    .replace(/([?&](?:access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|token|secret|password|api[_-]?key|authorization|session(?:[_-]?id)?|cookie)=)[^&#\s]+/gi, '$1[REDACTED]')
-    .replace(/\b(?:sk-[A-Za-z0-9_-]{16,}|github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{30,})\b/g, '[REDACTED]')
-    .slice(0, limit);
+  return redactSecrets(String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ')).slice(0, limit);
 }
 
 function safeRequestId(value) {
