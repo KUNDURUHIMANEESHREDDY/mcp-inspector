@@ -61,3 +61,42 @@ test('stderr structured logs redact ID/session/private keys and common credentia
   assert.match(output, /"private_key":"\[REDACTED\]"/);
   assert.match(output, /id_token=\[REDACTED\]&session_id=\[REDACTED\]/);
 });
+
+test('URL userinfo redaction removes malformed raw at-sign suffixes without leaking credentials', async () => {
+  const { redactSecrets } = await import('../src/observability/redact-secrets.js');
+  const input = 'connect https://alice:p@ss@issuer.example/path?keep=yes';
+  const output = redactSecrets(input);
+  assert.doesNotMatch(output, /alice|p@ss|ss@issuer/);
+  assert.match(output, /https:\/\/\[REDACTED\]@issuer\.example\/path\?keep=yes/);
+});
+
+test('URL userinfo redaction covers WHATWG backslash and slashless special-scheme forms', async () => {
+  const { redactSecrets } = await import('../src/observability/redact-secrets.js');
+  const inputs = [
+    'connect https:\\alice:pass@issuer.example/path',
+    'connect https:/\\alice:pass@issuer.example/path',
+    'connect https:alice:pass@issuer.example/path',
+  ];
+  for (const input of inputs) {
+    const output = redactSecrets(input);
+    assert.doesNotMatch(output, /alice|pass/);
+    assert.match(output, /issuer\.example\/path/);
+  }
+});
+
+
+test('URL userinfo redaction covers WHATWG whitespace normalization inside credentials', async () => {
+  const { redactSecrets } = await import('../src/observability/redact-secrets.js');
+  const inputs = [
+    'https://alice:pa\nss@issuer.example/path',
+    'https://alice:pa\tss@issuer.example/path',
+    'https://alice:pa\rss@issuer.example/path',
+    'https://alice:pa ss@issuer.example/path',
+  ];
+  for (const input of inputs) {
+    assert.notEqual(new URL(input).password, '');
+    const output = redactSecrets('connect ' + input);
+    assert.doesNotMatch(output, /alice|pass|pa%20ss/);
+    assert.match(output, /https:\/\/\[REDACTED\]@issuer\.example\/path/);
+  }
+});
