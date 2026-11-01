@@ -366,7 +366,7 @@ function inspectJsonBody(inspector, chunks, totalBytes, maxBytes) {
 function readMaxRequestBytes() {
   const raw = process.env.MCP_INSPECTOR_MAX_REQUEST_BYTES;
   if (raw === undefined) return 16 * 1024 * 1024;
-  if (!/^\\d+$/.test(raw)) {
+  if (!/^\d+$/.test(raw)) {
     throw new RangeError('MCP_INSPECTOR_MAX_REQUEST_BYTES must be an integer between 1024 and 67108864');
   }
   const value = Number(raw);
