@@ -216,8 +216,16 @@ export class MessageInspector {
 }
 
 export function readMaxFrameBytes() {
-  const raw = Number(process.env.MCP_INSPECTOR_MAX_FRAME_BYTES ?? 16 * 1024 * 1024);
-  return Number.isSafeInteger(raw) && raw >= 1024 ? raw : 16 * 1024 * 1024;
+  const raw = process.env.MCP_INSPECTOR_MAX_FRAME_BYTES;
+  if (raw === undefined) return 16 * 1024 * 1024;
+  if (!/^\\d+$/.test(raw)) {
+    throw new RangeError('MCP_INSPECTOR_MAX_FRAME_BYTES must be an integer between 1024 and 67108864');
+  }
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1024 || value > 64 * 1024 * 1024) {
+    throw new RangeError('MCP_INSPECTOR_MAX_FRAME_BYTES must be an integer between 1024 and 67108864');
+  }
+  return value;
 }
 
 function readRpcTimeoutMs() {
