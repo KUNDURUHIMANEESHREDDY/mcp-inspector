@@ -144,12 +144,15 @@ test('HTTP proxy authenticates remote clients without forwarding the proxy crede
     const proxyAddress = proxy.server.address();
 
     const send = ({ method = 'POST', headers = {}, body = '{"jsonrpc":"2.0","id":11,"method":"ping"}' } = {}) => new Promise((resolve, reject) => {
+      const requestHeaders = Array.isArray(headers)
+        ? ['content-type', 'application/json', ...headers]
+        : { 'content-type': 'application/json', ...headers };
       const request = httpRequest({
         hostname: '127.0.0.1',
         port: proxyAddress.port,
         path: '/mcp',
         method,
-        headers: { 'content-type': 'application/json', ...headers },
+        headers: requestHeaders,
       }, (response) => {
         const chunks = [];
         response.on('data', (chunk) => chunks.push(chunk));
@@ -181,6 +184,15 @@ test('HTTP proxy authenticates remote clients without forwarding the proxy crede
     });
     assert.equal(malformedHost.status, 403);
     assert.equal(upstreamCalls, 0, 'malformed Host authority must be rejected before contacting upstream');
+
+    const duplicateAuthorization = await send({
+      headers: [
+        'authorization', 'Bearer ' + proxyToken,
+        'authorization', 'Bearer ' + proxyToken,
+      ],
+    });
+    assert.equal(duplicateAuthorization.status, 400);
+    assert.equal(upstreamCalls, 0, 'duplicate Authorization fields must be rejected before contacting upstream');
 
     for (const invalidDnsHost of [
       'bad..example',
