@@ -387,7 +387,7 @@ test('upstream DNS address policy blocks private/reserved ranges unless explicit
   ]) {
     assert.equal(isRestrictedUpstreamAddress(address), true, 'restricted: ' + address);
   }
-  for (const address of ['8.8.8.8', '1.1.1.1', '2606:4700:4700::1111', '2606:4700:4700:0000:0000:0000:1111', '64:ff9b::808:808']) {
+  for (const address of ['8.8.8.8', '1.1.1.1', '2606:4700:4700::1111', '2606:4700:4700:0000:0000:0000:0000:1111', '64:ff9b::808:808']) {
     assert.equal(isRestrictedUpstreamAddress(address), false, 'public: ' + address);
   }
 });
