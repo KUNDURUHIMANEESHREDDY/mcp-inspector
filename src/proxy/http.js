@@ -297,6 +297,18 @@ function rejectRequest(outgoing, reason) {
   outgoing.end('Forbidden');
 }
 
+function rejectBadRequest(outgoing, reason) {
+  log('warn', 'http.request_rejected', { reason });
+  const body = 'Bad request';
+  outgoing.writeHead(400, {
+    'content-type': 'text/plain; charset=utf-8',
+    'cache-control': 'no-store',
+    'content-length': Buffer.byteLength(body),
+    'x-content-type-options': 'nosniff',
+  });
+  outgoing.end(body);
+}
+
 function rejectUnauthorized(outgoing) {
   log('warn', 'http.request_rejected', { reason: 'proxy_auth_required' });
   const body = 'Unauthorized';
@@ -404,6 +416,15 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
   const server = createServer((incoming, outgoing) => {
     const hostHeaderCount = incoming.rawHeaders.reduce((count, name, index) =>
       index % 2 === 0 && name.toLowerCase() === 'host' ? count + 1 : count, 0);
+    const authorizationHeaderCount = incoming.rawHeaders.reduce((count, name, index) =>
+      index % 2 === 0 && name.toLowerCase() === 'authorization' ? count + 1 : count, 0);
+    // Reject ambiguous duplicate credentials before Node's normalized headers
+    // or an upstream intermediary can apply different duplicate-header rules.
+    if (authorizationHeaderCount > 1) {
+      incoming.resume();
+      rejectBadRequest(outgoing, 'duplicate_authorization');
+      return;
+    }
     const requestHostname = hostHeaderHostname(incoming.headers.host);
     // HTTP/1.1 requests must have exactly one Host field. Reject duplicate
     // authorities instead of relying on parser-specific duplicate-header policy.
