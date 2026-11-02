@@ -3,6 +3,8 @@ import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { lookup as dnsLookup } from 'node:dns';
 import { isIP } from 'node:net';
+import { isLoopbackHostname as isLoopback, normalizeHostname } from '../network/address.js';
+export { isLoopbackAddress } from '../network/address.js';
 import { MessageInspector } from '../protocol/inspector.js';
 import { ContractRecorder } from '../contracts/contract.js';
 import { SseObserver } from '../protocol/sse-parser.js';
@@ -21,24 +23,6 @@ function filterHopHeaders(headers) {
     value !== undefined && !blocked.has(name.toLowerCase())));
 }
 
-function normalizeHostname(host) {
-  const value = String(host || '').toLowerCase();
-  if (value.startsWith('[') || value.endsWith(']')) {
-    if (!value.startsWith('[') || !value.endsWith(']')) return '';
-    const address = value.slice(1, -1);
-    return isIP(address) === 6 ? address : '';
-  }
-  if (value.includes('[') || value.includes(']')) return '';
-  return value.replace(/\.$/, '');
-}
-
-function isLoopback(host) {
-  const normalized = normalizeHostname(host);
-  // The complete 127.0.0.0/8 block is IPv4 loopback, not only 127.0.0.1.
-  // Reuse the address classifier so binds, Host checks, Origins and upstream
-  // trust decisions apply the same IPv4/IPv6-mapped loopback semantics.
-  return normalized === 'localhost' || isLoopbackAddress(normalized);
-}
 
 function inIpv4Range(address, network, prefix) {
   const value = address.split('.').reduce((acc, part) => ((acc * 256) + Number(part)) >>> 0, 0);
@@ -147,33 +131,6 @@ function parseAllowedUpstreamHosts(raw) {
     hosts.add(host);
   }
   return hosts;
-}
-
-export function isLoopbackAddress(address) {
-  // Let Node validate the complete literal first. Zone identifiers are valid
-  // for IPv6, but accepting them on IPv4 would turn malformed inputs such as
-  // "127.0.0.1%lo0" into trusted loopback addresses.
-  const raw = String(address || '').toLowerCase().replace(/^\[|\]$/g, '');
-  const family = isIP(raw);
-  if (family === 4) return inIpv4Range(raw, '127.0.0.0', 8);
-  if (family === 6) {
-    const clean = raw.split('%', 1)[0];
-    const value = ipv6ToBigInt(clean);
-    if (value === 1n) return true;
-    // IPv4-mapped loopback answers are loopback too, but only when the
-    // embedded IPv4 address belongs to 127.0.0.0/8.
-    if ((value >> 32n) === 0xffffn) {
-      const embedded = Number(value & 0xffffffffn);
-      const ipv4 = [
-        (embedded >>> 24) & 255,
-        (embedded >>> 16) & 255,
-        (embedded >>> 8) & 255,
-        embedded & 255,
-      ].join('.');
-      return inIpv4Range(ipv4, '127.0.0.0', 8);
-    }
-  }
-  return false;
 }
 
 export function createSafeUpstreamLookup(allowedHosts, lookup = dnsLookup) {
