@@ -3,12 +3,13 @@ import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { lookup as dnsLookup } from 'node:dns';
 import { isIP } from 'node:net';
-import { isLoopbackHostname as isLoopback, normalizeHostname } from '../network/address.js';
-export { isLoopbackAddress } from '../network/address.js';
+import { isLoopbackAddress, isLoopbackHostname as isLoopback, normalizeHostname } from '../network/address.js';
 import { MessageInspector } from '../protocol/inspector.js';
 import { ContractRecorder } from '../contracts/contract.js';
 import { SseObserver } from '../protocol/sse-parser.js';
 import { log, logError } from '../observability/logger.js';
+
+export { isLoopbackAddress };
 
 const HOP_BY_HOP = new Set([
   'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
