@@ -1087,3 +1087,60 @@ test('HTTP proxy closes unauthenticated partial requests without draining their 
     }
   }
 });
+
+
+test('HTTP proxy rejects CORS preflight bodies without draining them', {
+  skip: !startHttpProxy,
+  timeout: 5000,
+}, async (t) => {
+  const envNames = [
+    'MCP_INSPECTOR_PROXY_BEARER_TOKEN',
+    'MCP_INSPECTOR_ALLOWED_ORIGINS',
+  ];
+  const previousEnv = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
+  let proxy;
+  let socket;
+  try {
+    process.env.MCP_INSPECTOR_PROXY_BEARER_TOKEN = 'test-client-token-with-at-least-32-characters';
+    process.env.MCP_INSPECTOR_ALLOWED_ORIGINS = 'http://localhost:3000';
+    proxy = startHttpProxy({
+      upstream: 'http://127.0.0.1:9',
+      listen: '0.0.0.0:0',
+      allowRemote: true,
+    });
+    if (!proxy.server.listening) await once(proxy.server, 'listening');
+    const address = proxy.server.address();
+
+    socket = netConnect(address.port, '127.0.0.1');
+    const chunks = [];
+    socket.on('data', (chunk) => chunks.push(chunk));
+    await once(socket, 'connect');
+    const closed = new Promise((resolve, reject) => {
+      socket.once('close', resolve);
+      socket.once('error', reject);
+    });
+    socket.write([
+      'OPTIONS /mcp HTTP/1.1',
+      'Host: 127.0.0.1:' + address.port,
+      'Origin: http://localhost:3000',
+      'Access-Control-Request-Method: POST',
+      'Content-Length: 1048576',
+      'Connection: keep-alive',
+      '',
+      'partial-preflight-body-that-is-never-completed',
+    ].join('\r\n'));
+
+    await closed;
+    const response = Buffer.concat(chunks).toString('latin1');
+    assert.ok(response.startsWith('HTTP/1.1 400 '), 'preflight bodies must be rejected as bad requests');
+    assert.ok(response.toLowerCase().includes('\r\nconnection: close\r\n'), 'rejected preflight must close the connection');
+    assert.ok(response.endsWith('\r\n\r\nBad request'), 'the complete rejection body must be flushed before closing');
+  } finally {
+    if (socket && !socket.destroyed) socket.destroy();
+    if (proxy) await proxy.close();
+    for (const name of envNames) {
+      if (previousEnv[name] === undefined) delete process.env[name];
+      else process.env[name] = previousEnv[name];
+    }
+  }
+});
