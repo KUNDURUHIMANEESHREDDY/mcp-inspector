@@ -309,29 +309,44 @@ function rejectBadRequest(outgoing, reason) {
   outgoing.end(body);
 }
 
-function rejectUnauthorized(outgoing) {
+function closeAfterResponse(outgoing, incoming) {
+  // Authentication failures must not keep an attacker-controlled request body
+  // alive on a reusable connection. Flush the small error response, then close.
+  const socket = incoming?.socket ?? outgoing.socket;
+  outgoing.once('finish', () => {
+    if (!socket || socket.destroyed) return;
+    if (typeof socket.destroySoon === 'function') socket.destroySoon();
+    else socket.destroy();
+  });
+}
+
+function rejectUnauthorized(outgoing, incoming) {
   log('warn', 'http.request_rejected', { reason: 'proxy_auth_required' });
   const body = 'Unauthorized';
   outgoing.writeHead(401, {
     'www-authenticate': 'Bearer realm="mcp-inspector"',
+    connection: 'close',
     'content-type': 'text/plain; charset=utf-8',
     'cache-control': 'no-store',
     'content-length': Buffer.byteLength(body),
     'x-content-type-options': 'nosniff',
   });
+  closeAfterResponse(outgoing, incoming);
   outgoing.end(body);
 }
 
-function rejectRateLimited(outgoing, retryAfterSeconds) {
+function rejectRateLimited(outgoing, retryAfterSeconds, incoming) {
   log('warn', 'http.request_rejected', { reason: 'proxy_auth_rate_limited' });
   const body = 'Too Many Requests';
   outgoing.writeHead(429, {
     'retry-after': String(Math.max(1, retryAfterSeconds)),
+    connection: 'close',
     'content-type': 'text/plain; charset=utf-8',
     'cache-control': 'no-store',
     'content-length': Buffer.byteLength(body),
     'x-content-type-options': 'nosniff',
   });
+  closeAfterResponse(outgoing, incoming);
   outgoing.end(body);
 }
 
@@ -505,9 +520,10 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
       const peerAddress = incoming.socket.remoteAddress;
       if (!hasValidBearerToken(incoming.headers.authorization, configuredProxyToken)) {
         const retryAfterSeconds = authFailureLimiter.recordFailure(peerAddress);
-        incoming.resume();
-        if (retryAfterSeconds > 0) rejectRateLimited(outgoing, retryAfterSeconds);
-        else rejectUnauthorized(outgoing);
+        // Do not drain an unauthenticated body. The rejection response closes
+        // the connection after it is flushed, bounding work before body parsing.
+        if (retryAfterSeconds > 0) rejectRateLimited(outgoing, retryAfterSeconds, incoming);
+        else rejectUnauthorized(outgoing, incoming);
         return;
       }
       authFailureLimiter.clear(peerAddress);
