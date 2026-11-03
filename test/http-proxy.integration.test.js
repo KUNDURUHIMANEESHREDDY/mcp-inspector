@@ -1071,13 +1071,13 @@ test('HTTP proxy closes unauthenticated partial requests without draining their 
       'Connection: keep-alive',
       '',
       'partial-body-that-is-never-completed',
-    ].join('\\r\\n'));
+    ].join('\r\n'));
 
     await closed;
     const response = Buffer.concat(chunks).toString('latin1');
-    assert.match(response, /^HTTP\\/1\\.1 401 /);
-    assert.match(response, /\\r\\nconnection: close\\r\\n/i);
-    assert.match(response, /\\r\\n\\r\\nUnauthorized$/);
+    assert.ok(response.startsWith('HTTP/1.1 401 '), 'proxy must send the authentication rejection');
+    assert.ok(response.toLowerCase().includes('\r\nconnection: close\r\n'), 'proxy must instruct the client to close');
+    assert.ok(response.endsWith('\r\n\r\nUnauthorized'), 'proxy must flush the complete rejection body before closing');
   } finally {
     if (socket && !socket.destroyed) socket.destroy();
     if (proxy) await proxy.close();
