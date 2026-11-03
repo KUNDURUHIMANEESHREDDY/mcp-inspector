@@ -170,10 +170,12 @@ test('HTTP proxy authenticates remote clients without forwarding the proxy crede
     const missing = await send();
     assert.equal(missing.status, 401);
     assert.equal(missing.headers['www-authenticate'], 'Bearer realm="mcp-inspector"');
+    assert.equal(missing.headers.connection, 'close', 'unauthenticated connections must close after the response');
     assert.equal(upstreamCalls, 0);
 
     const wrong = await send({ headers: { authorization: 'Bearer wrong-token' } });
     assert.equal(wrong.status, 401);
+    assert.equal(wrong.headers.connection, 'close', 'invalid-token connections must close after the response');
     assert.equal(upstreamCalls, 0);
 
     const malformedHost = await send({
@@ -301,6 +303,7 @@ test('HTTP proxy throttles repeated failed remote authentication by socket peer'
     const limited = await send('Bearer invalid-token', '198.51.100.99');
     assert.equal(limited.status, 429);
     assert.match(limited.headers['retry-after'], /^\d+$/);
+    assert.equal(limited.headers.connection, 'close', 'rate-limited connections must close after the response');
     assert.equal(upstreamCalls, 0, 'invalid credentials must never reach the upstream');
 
     const authorized = await send('Bearer ' + proxyToken);
