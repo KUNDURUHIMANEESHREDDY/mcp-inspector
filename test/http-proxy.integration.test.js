@@ -1028,3 +1028,62 @@ test('HTTP proxy rejects invalid frame-size configuration at startup', { skip: !
     else process.env.MCP_INSPECTOR_MAX_FRAME_BYTES = previous;
   }
 });
+
+
+test('HTTP proxy closes unauthenticated partial requests without draining their bodies', {
+  skip: !startHttpProxy,
+  timeout: 5000,
+}, async (t) => {
+  const envNames = [
+    'MCP_INSPECTOR_PROXY_BEARER_TOKEN',
+    'MCP_INSPECTOR_ALLOWED_ORIGINS',
+  ];
+  const previousEnv = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
+  const proxyToken = 'test-client-token-with-at-least-32-characters';
+  let proxy;
+  let socket;
+  try {
+    process.env.MCP_INSPECTOR_PROXY_BEARER_TOKEN = proxyToken;
+    process.env.MCP_INSPECTOR_ALLOWED_ORIGINS = 'http://localhost:3000';
+
+    proxy = startHttpProxy({
+      upstream: 'http://127.0.0.1:9',
+      listen: '0.0.0.0:0',
+      allowRemote: true,
+    });
+    if (!proxy.server.listening) await once(proxy.server, 'listening');
+    const address = proxy.server.address();
+
+    socket = netConnect(address.port, '127.0.0.1');
+    const chunks = [];
+    socket.on('data', (chunk) => chunks.push(chunk));
+    await once(socket, 'connect');
+
+    const closed = new Promise((resolve, reject) => {
+      socket.once('close', resolve);
+      socket.once('error', reject);
+    });
+    socket.write([
+      'POST /mcp HTTP/1.1',
+      `Host: 127.0.0.1:${address.port}`,
+      'Content-Type: application/json',
+      'Content-Length: 1048576',
+      'Connection: keep-alive',
+      '',
+      'partial-body-that-is-never-completed',
+    ].join('\\r\\n'));
+
+    await closed;
+    const response = Buffer.concat(chunks).toString('latin1');
+    assert.match(response, /^HTTP\\/1\\.1 401 /);
+    assert.match(response, /\\r\\nconnection: close\\r\\n/i);
+    assert.match(response, /\\r\\n\\r\\nUnauthorized$/);
+  } finally {
+    if (socket && !socket.destroyed) socket.destroy();
+    if (proxy) await proxy.close();
+    for (const name of envNames) {
+      if (previousEnv[name] === undefined) delete process.env[name];
+      else process.env[name] = previousEnv[name];
+    }
+  }
+});
