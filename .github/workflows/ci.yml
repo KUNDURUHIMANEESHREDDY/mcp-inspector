@@ -88,18 +88,37 @@ jobs:
       - name: Framing benchmark
         run: node ./bench/framer.js
 
+  browser-e2e:
+    name: Browser E2E
+    uses: ./.github/workflows/browser-e2e.yml
+    permissions:
+      contents: read
+
+  codeql:
+    name: CodeQL
+    uses: ./.github/workflows/codeql.yml
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
   required:
     name: required
     if: always()
-    needs: [test, windows-smoke]
+    needs: [test, windows-smoke, browser-e2e, codeql]
     runs-on: ubuntu-latest
     steps:
       - name: Require all supported runtime and Windows checks to pass
         env:
           MATRIX_RESULT: ${{ needs.test.result }}
           WINDOWS_RESULT: ${{ needs.windows-smoke.result }}
+          BROWSER_E2E_RESULT: ${{ needs.browser-e2e.result }}
+          CODEQL_RESULT: ${{ needs.codeql.result }}
         shell: bash
         run: |
-          printf 'Node matrix: %s\\nWindows smoke: %s\\n' "$MATRIX_RESULT" "$WINDOWS_RESULT"
+          set -euo pipefail
+          printf 'Node matrix: %s\\nWindows smoke: %s\\nBrowser E2E: %s\\nCodeQL: %s\\n' "$MATRIX_RESULT" "$WINDOWS_RESULT" "$BROWSER_E2E_RESULT" "$CODEQL_RESULT"
           test "$MATRIX_RESULT" = success
           test "$WINDOWS_RESULT" = success
+          test "$BROWSER_E2E_RESULT" = success
+          test "$CODEQL_RESULT" = success
