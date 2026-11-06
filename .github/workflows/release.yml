@@ -8,14 +8,30 @@ on:
 
 permissions:
   contents: write
+  security-events: write
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
+  browser-e2e:
+    name: Required browser E2E
+    uses: ./.github/workflows/browser-e2e.yml
+    permissions:
+      contents: read
+
+  codeql:
+    name: Required CodeQL
+    uses: ./.github/workflows/codeql.yml
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
   package:
     name: Verify and publish source artifacts
+    needs: [browser-e2e, codeql]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
