@@ -5,9 +5,9 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const ci = readFileSync(resolve(ROOT, '.github/workflows/ci.yml'), 'utf8');
-const browser = readFileSync(resolve(ROOT, '.github/workflows/browser-e2e.yml'), 'utf8');
-const codeql = readFileSync(resolve(ROOT, '.github/workflows/codeql.yml'), 'utf8');
+const ci = readFileSync(resolve(ROOT, '.github/workflows/ci.yml'), 'utf8').replace(/\r\n/g, '\n');
+const browser = readFileSync(resolve(ROOT, '.github/workflows/browser-e2e.yml'), 'utf8').replace(/\r\n/g, '\n');
+const codeql = readFileSync(resolve(ROOT, '.github/workflows/codeql.yml'), 'utf8').replace(/\r\n/g, '\n');
 
 test('Browser E2E and CodeQL workflows are reusable without losing standalone triggers', () => {
   assert.match(browser, /^  workflow_call:\s*$/m);
