@@ -4,6 +4,7 @@ import { performance } from 'node:perf_hooks';
 import { createContract, contractHash } from '../contracts/contract.js';
 import { summarizeCompatibilityResults } from './engine.js';
 import { createOAuthContext } from './oauth-provider.js';
+import { isLoopbackHostname as isLoopback } from '../network/address.js';
 
 const PROTOCOL_MODES = new Set(['legacy', 'auto', 'modern']);
 const TRANSPORTS = new Set(['stdio', 'http']);
@@ -20,11 +21,6 @@ function validateEndpoint(value) {
   if (!['http:', 'https:'].includes(endpoint.protocol)) throw new TypeError('HTTP endpoint must use http or https');
   if (endpoint.username || endpoint.password) throw new TypeError('Credentials in endpoint URLs are not allowed; use a protected environment or gateway');
   return endpoint;
-}
-
-function isLoopback(hostname) {
-  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
-  return host === 'localhost' || host === '127.0.0.1' || host === '::1';
 }
 
 function getHttpHeaders(endpoint, oauth) {
