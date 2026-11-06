@@ -23,9 +23,9 @@ jobs:
         node: ['22', '24', '26']
     steps:
       - name: Checkout
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up Node.js
-        uses: actions/setup-node@v7.1.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node }}
       - name: Install locked dependencies
@@ -51,7 +51,7 @@ jobs:
         run: git archive --format=zip --prefix=mcp-inspector/ HEAD -o mcp-inspector-light-dashboard.zip
       - name: Upload packaged source archive
         if: matrix.node == '24'
-        uses: actions/upload-artifact@v6.0.0
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: mcp-inspector-light-dashboard
           path: mcp-inspector-light-dashboard.zip
@@ -59,7 +59,7 @@ jobs:
           retention-days: 30
       - name: Upload verification evidence
         if: matrix.node == '24'
-        uses: actions/upload-artifact@v6.0.0
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: mcp-inspector-verification-evidence
           path: |-
@@ -74,9 +74,9 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up Node.js
-        uses: actions/setup-node@v7.1.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22'
       - name: Install locked dependencies
