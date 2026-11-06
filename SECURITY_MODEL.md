@@ -36,3 +36,8 @@ MCP Inspector is a local developer diagnostic tool and protocol observer. It is 
 Run npm run check, npm test, npm run test:browser, npm audit --audit-level=high, and review the generated SBOM. CI uses Node.js 22, 24, and 26 plus a Windows/Node 22 smoke lane. The browser E2E workflow installs Playwright and Chromium separately from the dependency-free unit-test path.
 
 These checks are regression signals, not a substitute for independent penetration testing, a review of deployment infrastructure, or a formal security certification.
+
+
+## Release gate
+
+The CI workflow calls Browser E2E and CodeQL as reusable prerequisites. Its single `required` aggregate fails unless the Node runtime matrix, Windows smoke, Chromium dashboard E2E, and CodeQL analysis all succeed. Configure the protected default branch to require the stable `required` context; separate green workflow runs are not a substitute for that aggregate.
