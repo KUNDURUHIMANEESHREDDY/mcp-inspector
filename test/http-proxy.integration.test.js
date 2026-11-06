@@ -4,18 +4,78 @@ import { createServer, request as httpRequest } from 'node:http';
 import { once } from 'node:events';
 import { connect as netConnect } from 'node:net';
 let startHttpProxy;
+let createSafeUpstreamLookup;
+let isLoopbackAddress;
 try {
-  ({ startHttpProxy } = await import('../src/proxy/http.js'));
+  ({ startHttpProxy, createSafeUpstreamLookup, isLoopbackAddress } = await import('../src/proxy/http.js'));
 } catch {
   // Dependency-backed HTTP integration tests run in CI after npm install.
 }
+
+test('loopback classifier handles IPv4-mapped IPv6 consistently', { skip: !isLoopbackAddress }, () => {
+  assert.equal(isLoopbackAddress('127.0.0.2'), true);
+  assert.equal(isLoopbackAddress('127.0.0.1%lo0'), false, 'IPv4 literals cannot carry IPv6 zone identifiers');
+  assert.equal(isLoopbackAddress('127.0.0.1%25lo0'), false, 'percent-encoded IPv4 zone suffixes are not loopback');
+  assert.equal(isLoopbackAddress('127.255.255.255'), true, 'the upper edge of 127.0.0.0/8 is loopback');
+  assert.equal(isLoopbackAddress('126.255.255.255'), false, 'the address immediately below the loopback block is not loopback');
+  assert.equal(isLoopbackAddress('128.0.0.1'), false, 'the address immediately above the loopback block is not loopback');
+  assert.equal(isLoopbackAddress('::1'), true);
+  assert.equal(isLoopbackAddress('[::1]'), true, 'bracketed IPv6 literals are normalized');
+  assert.equal(isLoopbackAddress('::1%lo0'), true, 'IPv6 zone identifiers do not change the loopback address');
+  assert.equal(isLoopbackAddress('::ffff:127.0.0.2'), true);
+  assert.equal(isLoopbackAddress('::ffff:192.0.2.1'), false);
+  assert.equal(isLoopbackAddress('192.0.2.1'), false);
+});
 
 test('HTTP proxy stays loopback-only by default and rejects embedded credentials', { skip: !startHttpProxy }, () => {
   assert.throws(() => startHttpProxy({ upstream: 'http://user:pass@127.0.0.1:3000' }), /Credentials in upstream URLs are not allowed/);
   assert.throws(() => startHttpProxy({ upstream: 'http://127.0.0.1:3000', listen: '0.0.0.0:9900' }), /Non-loopback binds require --allow-remote/);
 });
+ 
+test('HTTP proxy treats the complete IPv4 loopback range as local', { skip: !startHttpProxy }, async (t) => {
+  const upstream = createServer((request, response) => {
+    request.resume();
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end('{"jsonrpc":"2.0","id":1,"result":{"ok":true}}');
+  });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  const upstreamAddress = upstream.address();
+  const proxy = startHttpProxy({
+    upstream: `http://127.0.0.1:${upstreamAddress.port}`,
+    listen: '127.0.0.2:0',
+  });
+  if (!proxy.server.listening) await once(proxy.server, 'listening');
+  const proxyAddress = proxy.server.address();
+  t.after(async () => {
+    await proxy.close();
+    await new Promise((resolve) => upstream.close(resolve));
+  });
 
-test('HTTP proxy rejects empty entries in the upstream host allowlist', { skip: !startHttpProxy }, async () => {
+  assert.equal(proxyAddress.address, '127.0.0.2');
+  const status = await new Promise((resolve, reject) => {
+    const request = httpRequest({
+      hostname: '127.0.0.2',
+      port: proxyAddress.port,
+      path: '/mcp',
+      method: 'POST',
+      headers: {
+        host: `127.0.0.2:${proxyAddress.port}`,
+        origin: 'http://127.0.0.2:3000',
+        'content-type': 'application/json',
+      },
+    }, (response) => {
+      response.resume();
+      response.on('end', () => resolve(response.statusCode));
+      response.on('error', reject);
+    });
+    request.on('error', reject);
+    request.end('{"jsonrpc":"2.0","id":1,"method":"ping"}');
+  });
+  assert.equal(status, 200, '127.0.0.2 bind, Host and Origin must be treated as loopback');
+});
+
+test('HTTP proxy rejects empty and malformed bracket entries in the upstream host allowlist', { skip: !startHttpProxy }, async () => {
   const previous = process.env.MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS;
   let proxy;
   try {
@@ -27,7 +87,15 @@ test('HTTP proxy rejects empty entries in the upstream host allowlist', { skip: 
         `reject malformed allowlist: ${JSON.stringify(value)}`,
       );
     }
-    process.env.MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS = '127.0.0.1,example.com';
+    for (const value of ['[127.0.0.1', '127.0.0.1]', '[127.0.0.1]', '[example.com]', '[example.com', 'example.com]']) {
+      process.env.MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS = value;
+      assert.throws(
+        () => startHttpProxy({ upstream: 'http://127.0.0.1:3000' }),
+        /MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS must be a comma-separated exact hostname\/IP allowlist/,
+        `reject malformed bracketed allowlist entry: ${JSON.stringify(value)}`,
+      );
+    }
+    process.env.MCP_INSPECTOR_ALLOWED_UPSTREAM_HOSTS = '[::1],example.com';
     proxy = startHttpProxy({ upstream: 'http://127.0.0.1:3000', listen: '127.0.0.1:0' });
     if (!proxy.server.listening) await once(proxy.server, 'listening');
   } finally {
@@ -301,7 +369,11 @@ test('upstream DNS address policy blocks private/reserved ranges unless explicit
   const { isRestrictedUpstreamAddress } = await import('../src/proxy/http.js');
   for (const address of [
     '127.0.0.1', '10.2.3.4', '169.254.4.2', '172.16.0.1', '192.168.1.4',
-    '224.0.0.1', '::1', 'fc00::1', 'fe80::1', '::ffff:7f00:1',
+    '224.0.0.1', '::1', 'fc00::1', 'fe80::1', 'fe80::1%eth0', '::ffff:7f00:1',
+    // IPv4 literals cannot carry IPv6 zone identifiers; malformed resolver answers fail closed.
+    '127.0.0.1%lo0', '8.8.8.8%lo0', '8.8.8.8%25lo0',
+    // DNS lookup answers are bare IP literals; bracketed or half-bracketed forms fail closed.
+    '[8.8.8.8]', '[8.8.8.8', '8.8.8.8]', '[2606:4700:4700::1111]',
     // Equivalent expanded forms must receive the same classification.
     '0:0:0:0:0:ffff:7f00:1',
     '2001:0db8:0000:0000:0000:0000:0000:0001',
@@ -314,6 +386,41 @@ test('upstream DNS address policy blocks private/reserved ranges unless explicit
   for (const address of ['8.8.8.8', '1.1.1.1', '2606:4700:4700::1111', '2606:4700:4700:0000:0000:0000:0000:1111']) {
     assert.equal(isRestrictedUpstreamAddress(address), false, 'public: ' + address);
   }
+});
+  
+test('localhost upstream DNS answers must remain inside loopback', { skip: !createSafeUpstreamLookup }, async () => {
+  const loopbackAnswers = [
+    { address: '127.0.0.1', family: 4 },
+    { address: '::1', family: 6 },
+    { address: '::ffff:127.0.0.1', family: 6 },
+  ];
+  const stubLookup = (answers) => (_hostname, _options, callback) => callback(null, answers);
+  const resolveWith = (hostname, answers, allowlist = new Set()) => new Promise((resolve) => {
+    createSafeUpstreamLookup(allowlist, stubLookup(answers))(hostname, { all: true }, (...args) => resolve(args));
+  });
+
+  // Hostname normalization must apply before the special-use exception.
+  for (const hostname of ['localhost', 'LOCALHOST.']) {
+    const local = await resolveWith(hostname, loopbackAnswers);
+    assert.equal(local[0], null);
+    assert.deepEqual(local[1], loopbackAnswers);
+  }
+
+  for (const answers of [
+    [{ address: '8.8.8.8', family: 4 }],
+    [{ address: '::ffff:8.8.8.8', family: 6 }],
+    [{ address: '127.0.0.1', family: 4 }, { address: '8.8.8.8', family: 4 }],
+    [{ address: '::1', family: 6 }, { address: '::ffff:8.8.8.8', family: 6 }],
+  ]) {
+    const result = await resolveWith('localhost', answers);
+    assert.equal(result[0]?.code, 'ERR_MCP_INSPECTOR_UPSTREAM_ADDRESS_BLOCKED');
+  }
+
+  // Explicit operator allowlisting remains the supported way to trust a
+  // private upstream hostname; the localhost exception is narrower.
+  const trusted = await resolveWith('trusted.internal', [{ address: '192.168.1.10', family: 4 }], new Set(['trusted.internal']));
+  assert.equal(trusted[0], null);
+  assert.deepEqual(trusted[1], [{ address: '192.168.1.10', family: 4 }]);
 });
 
 test('HTTP proxy forwards validated configured upstream headers without logging their values', { skip: !startHttpProxy }, async (t) => {
