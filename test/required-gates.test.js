@@ -11,11 +11,14 @@ const codeql = readFileSync(resolve(ROOT, '.github/workflows/codeql.yml'), 'utf8
 
 test('Browser E2E and CodeQL workflows are reusable without losing standalone triggers', () => {
   assert.match(browser, /^  workflow_call:\s*$/m);
-  assert.match(browser, /^  pull_request:\s*$/m);
-  assert.match(browser, /^    branches: \[main\]$/m);
+  assert.match(browser, /^  workflow_dispatch:\s*$/m);
+  assert.doesNotMatch(browser, /^  pull_request:/m);
+  assert.doesNotMatch(browser, /^  push:/m);
   assert.match(codeql, /^  workflow_call:\s*$/m);
-  assert.match(codeql, /^  pull_request:\s*$/m);
   assert.match(codeql, /^  schedule:\s*$/m);
+  assert.match(codeql, /^  workflow_dispatch:\s*$/m);
+  assert.doesNotMatch(codeql, /^  pull_request:/m);
+  assert.doesNotMatch(codeql, /^  push:/m);
 });
 
 test('CI invokes Browser E2E and CodeQL as reusable workflows', () => {
