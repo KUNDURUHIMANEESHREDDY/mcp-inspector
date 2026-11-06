@@ -23,3 +23,24 @@ test('failed-auth limiter rejects unsafe bounds', () => {
   assert.throws(() => createAuthFailureLimiter({ windowMs: 0 }), /windowMs/);
   assert.throws(() => createAuthFailureLimiter({ maxEntries: 0 }), /maxEntries/);
 });
+
+test('failed-auth windows use the injected monotonic clock and expire at the boundary', () => {
+  let tick = 0;
+  const limiter = createAuthFailureLimiter({
+    maxAttempts: 1,
+    windowMs: 1_000,
+    clock: () => tick,
+  });
+
+  assert.equal(limiter.recordFailure('peer-a'), 0);
+  assert.equal(limiter.recordFailure('peer-a'), 1);
+  tick = 1_000;
+  assert.equal(limiter.recordFailure('peer-a'), 0);
+  assert.equal(limiter.recordFailure('peer-a'), 1);
+});
+
+test('failed-auth limiter validates its clock contract', () => {
+  assert.throws(() => createAuthFailureLimiter({ clock: 1 }), /clock must be a function/);
+  const limiter = createAuthFailureLimiter({ clock: () => Number.NaN });
+  assert.throws(() => limiter.recordFailure('peer-a'), /clock must return a finite number/);
+});
