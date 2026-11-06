@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { activateDashboardEventCapture, getDashboardEvents, getDashboardSummary, onDashboardEvent } from './event-store.js';
+import { isLoopbackHostname as isLoopback } from '../network/address.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), 'ui');
 const ASSETS = new Map([
@@ -13,11 +14,6 @@ const ASSETS = new Map([
 ]);
 const startedAt = new Date().toISOString();
 const clients = new Set();
-
-function isLoopback(host) {
-  const value = String(host || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
-  return value === '127.0.0.1' || value === '::1' || value === 'localhost';
-}
 
 function parseListen(value) {
   const input = String(value || '127.0.0.1:9911').trim();
