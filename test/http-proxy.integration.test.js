@@ -170,10 +170,12 @@ test('HTTP proxy authenticates remote clients without forwarding the proxy crede
     const missing = await send();
     assert.equal(missing.status, 401);
     assert.equal(missing.headers['www-authenticate'], 'Bearer realm="mcp-inspector"');
+    assert.equal(missing.headers.connection, 'close', 'unauthenticated connections must close after the response');
     assert.equal(upstreamCalls, 0);
 
     const wrong = await send({ headers: { authorization: 'Bearer wrong-token' } });
     assert.equal(wrong.status, 401);
+    assert.equal(wrong.headers.connection, 'close', 'invalid-token connections must close after the response');
     assert.equal(upstreamCalls, 0);
 
     const malformedHost = await send({
@@ -301,6 +303,7 @@ test('HTTP proxy throttles repeated failed remote authentication by socket peer'
     const limited = await send('Bearer invalid-token', '198.51.100.99');
     assert.equal(limited.status, 429);
     assert.match(limited.headers['retry-after'], /^\d+$/);
+    assert.equal(limited.headers.connection, 'close', 'rate-limited connections must close after the response');
     assert.equal(upstreamCalls, 0, 'invalid credentials must never reach the upstream');
 
     const authorized = await send('Bearer ' + proxyToken);
@@ -611,6 +614,10 @@ test('upstream DNS address policy blocks private/reserved ranges unless explicit
   for (const address of [
     '127.0.0.1', '10.2.3.4', '169.254.4.2', '172.16.0.1', '192.168.1.4',
     '224.0.0.1', '::1', 'fc00::1', 'fe80::1', 'fe80::1%eth0', '::ffff:7f00:1',
+    // RFC 6052 Well-Known NAT64 inherits the embedded IPv4 restrictions.
+    '64:ff9b::7f00:1', '64:ff9b::a00:1', '64:ff9b::a9fe:1', '64:ff9b::c0a8:101',
+    // RFC 8215 local-use translation space is not globally reachable.
+    '64:ff9b:1::c0a8:101',
     // IPv4 literals cannot carry IPv6 zone identifiers; malformed resolver answers fail closed.
     '127.0.0.1%lo0', '8.8.8.8%lo0', '8.8.8.8%25lo0',
     // DNS lookup answers are bare IP literals; bracketed or half-bracketed forms fail closed.
@@ -624,7 +631,7 @@ test('upstream DNS address policy blocks private/reserved ranges unless explicit
   ]) {
     assert.equal(isRestrictedUpstreamAddress(address), true, 'restricted: ' + address);
   }
-  for (const address of ['8.8.8.8', '1.1.1.1', '2606:4700:4700::1111', '2606:4700:4700:0000:0000:0000:0000:1111']) {
+  for (const address of ['8.8.8.8', '1.1.1.1', '2606:4700:4700::1111', '2606:4700:4700:0000:0000:0000:0000:1111', '64:ff9b::808:808']) {
     assert.equal(isRestrictedUpstreamAddress(address), false, 'public: ' + address);
   }
 });
@@ -1023,5 +1030,121 @@ test('HTTP proxy rejects invalid frame-size configuration at startup', { skip: !
   } finally {
     if (previous === undefined) delete process.env.MCP_INSPECTOR_MAX_FRAME_BYTES;
     else process.env.MCP_INSPECTOR_MAX_FRAME_BYTES = previous;
+  }
+});
+
+
+test('HTTP proxy closes unauthenticated partial requests without draining their bodies', {
+  skip: !startHttpProxy,
+  timeout: 5000,
+}, async (t) => {
+  const envNames = [
+    'MCP_INSPECTOR_PROXY_BEARER_TOKEN',
+    'MCP_INSPECTOR_ALLOWED_ORIGINS',
+  ];
+  const previousEnv = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
+  const proxyToken = 'test-client-token-with-at-least-32-characters';
+  let proxy;
+  let socket;
+  try {
+    process.env.MCP_INSPECTOR_PROXY_BEARER_TOKEN = proxyToken;
+    process.env.MCP_INSPECTOR_ALLOWED_ORIGINS = 'http://localhost:3000';
+
+    proxy = startHttpProxy({
+      upstream: 'http://127.0.0.1:9',
+      listen: '0.0.0.0:0',
+      allowRemote: true,
+    });
+    if (!proxy.server.listening) await once(proxy.server, 'listening');
+    const address = proxy.server.address();
+
+    socket = netConnect(address.port, '127.0.0.1');
+    const chunks = [];
+    socket.on('data', (chunk) => chunks.push(chunk));
+    await once(socket, 'connect');
+
+    const closed = new Promise((resolve, reject) => {
+      socket.once('close', resolve);
+      socket.once('error', reject);
+    });
+    socket.write([
+      'POST /mcp HTTP/1.1',
+      `Host: 127.0.0.1:${address.port}`,
+      'Content-Type: application/json',
+      'Content-Length: 1048576',
+      'Connection: keep-alive',
+      '',
+      'partial-body-that-is-never-completed',
+    ].join('\r\n'));
+
+    await closed;
+    const response = Buffer.concat(chunks).toString('latin1');
+    assert.ok(response.startsWith('HTTP/1.1 401 '), 'proxy must send the authentication rejection');
+    assert.ok(response.toLowerCase().includes('\r\nconnection: close\r\n'), 'proxy must instruct the client to close');
+    assert.ok(response.endsWith('\r\n\r\nUnauthorized'), 'proxy must flush the complete rejection body before closing');
+  } finally {
+    if (socket && !socket.destroyed) socket.destroy();
+    if (proxy) await proxy.close();
+    for (const name of envNames) {
+      if (previousEnv[name] === undefined) delete process.env[name];
+      else process.env[name] = previousEnv[name];
+    }
+  }
+});
+
+
+test('HTTP proxy rejects CORS preflight bodies without draining them', {
+  skip: !startHttpProxy,
+  timeout: 5000,
+}, async (t) => {
+  const envNames = [
+    'MCP_INSPECTOR_PROXY_BEARER_TOKEN',
+    'MCP_INSPECTOR_ALLOWED_ORIGINS',
+  ];
+  const previousEnv = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
+  let proxy;
+  let socket;
+  try {
+    process.env.MCP_INSPECTOR_PROXY_BEARER_TOKEN = 'test-client-token-with-at-least-32-characters';
+    process.env.MCP_INSPECTOR_ALLOWED_ORIGINS = 'http://localhost:3000';
+    proxy = startHttpProxy({
+      upstream: 'http://127.0.0.1:9',
+      listen: '0.0.0.0:0',
+      allowRemote: true,
+    });
+    if (!proxy.server.listening) await once(proxy.server, 'listening');
+    const address = proxy.server.address();
+
+    socket = netConnect(address.port, '127.0.0.1');
+    const chunks = [];
+    socket.on('data', (chunk) => chunks.push(chunk));
+    await once(socket, 'connect');
+    const closed = new Promise((resolve, reject) => {
+      socket.once('close', resolve);
+      socket.once('error', reject);
+    });
+    socket.write([
+      'OPTIONS /mcp HTTP/1.1',
+      'Host: 127.0.0.1:' + address.port,
+      'Origin: http://localhost:3000',
+      'Access-Control-Request-Method: POST',
+      'Content-Length: 1048576',
+      'Connection: keep-alive',
+      '',
+      'partial-preflight-body-that-is-never-completed',
+    ].join('\r\n'));
+
+    await closed;
+    const response = Buffer.concat(chunks).toString('latin1');
+    assert.ok(response.startsWith('HTTP/1.1 400 '), 'preflight bodies must be rejected as bad requests');
+    assert.ok(response.toLowerCase().includes('\r\nconnection: close\r\n'), 'rejected preflight must close the connection');
+    assert.ok(response.endsWith('\r\n\r\nBad request'), 'the complete rejection body must be flushed before closing');
+  } finally {
+    if (socket && !socket.destroyed) socket.destroy();
+    if (proxy) await proxy.close();
+    for (const name of envNames) {
+      if (previousEnv[name] === undefined) delete process.env[name];
+      else process.env[name] = previousEnv[name];
+    }
   }
 });
