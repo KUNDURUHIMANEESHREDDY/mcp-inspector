@@ -5,10 +5,13 @@ import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { lookup as dnsLookup } from 'node:dns';
 import { isIP } from 'node:net';
-import { MessageInspector } from '../protocol/inspector.js';
+import { isLoopbackAddress, isLoopbackHostname as isLoopback, normalizeHostname } from '../network/address.js';
+import { MessageInspector, readMaxFrameBytes } from '../protocol/inspector.js';
 import { ContractRecorder } from '../contracts/contract.js';
 import { SseObserver } from '../protocol/sse-parser.js';
 import { log, logError } from '../observability/logger.js';
+
+export { isLoopbackAddress };
 
 const HOP_BY_HOP = new Set([
   'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
@@ -21,25 +24,6 @@ function filterHopHeaders(headers) {
   const blocked = new Set([...HOP_BY_HOP, ...connectionTokens]);
   return Object.fromEntries(Object.entries(headers).filter(([name, value]) =>
     value !== undefined && !blocked.has(name.toLowerCase())));
-}
-
-function normalizeHostname(host) {
-  const value = String(host || '').toLowerCase();
-  if (value.startsWith('[') || value.endsWith(']')) {
-    if (!value.startsWith('[') || !value.endsWith(']')) return '';
-    const address = value.slice(1, -1);
-    return isIP(address) === 6 ? address : '';
-  }
-  if (value.includes('[') || value.includes(']')) return '';
-  return value.replace(/\.$/, '');
-}
-
-function isLoopback(host) {
-  const normalized = normalizeHostname(host);
-  // The complete 127.0.0.0/8 block is IPv4 loopback, not only 127.0.0.1.
-  // Reuse the address classifier so binds, Host checks, Origins and upstream
-  // trust decisions apply the same IPv4/IPv6-mapped loopback semantics.
-  return normalized === 'localhost' || isLoopbackAddress(normalized);
 }
 
 function inIpv4Range(address, network, prefix) {
@@ -78,6 +62,19 @@ export function isRestrictedUpstreamAddress(address) {
       ].join('.'));
     }
 
+    // RFC 6052's Well-Known Prefix embeds an IPv4 destination in the low
+    // 32 bits. Apply the IPv4 policy to that destination so a global-looking
+    // NAT64 literal cannot reach loopback, RFC1918, link-local or reserved IPv4.
+    if (ipv6InRange(value, '64:ff9b::', 96)) {
+      const embedded = Number(value & 0xffffffffn);
+      return isRestrictedUpstreamAddress([
+        (embedded >>> 24) & 255,
+        (embedded >>> 16) & 255,
+        (embedded >>> 8) & 255,
+        embedded & 255,
+      ].join('.'));
+    }
+
     // Only global-unicast IPv6 is eligible for implicit upstream access.
     // Several special-use ranges sit inside 2000::/3, so the broad global
     // prefix check is followed by explicit IANA special-use exclusions.
@@ -87,6 +84,7 @@ export function isRestrictedUpstreamAddress(address) {
       ['2001:db8::', 32],   // Documentation
       ['2002::', 16],       // Deprecated 6to4
       ['3fff::', 20],       // Documentation
+      ['64:ff9b:1::', 48],  // RFC 8215 local-use translation prefix
     ];
     return specialUseRanges.some(([network, prefix]) => ipv6InRange(value, network, prefix));
   }
@@ -149,33 +147,6 @@ function parseAllowedUpstreamHosts(raw) {
     hosts.add(host);
   }
   return hosts;
-}
-
-export function isLoopbackAddress(address) {
-  // Let Node validate the complete literal first. Zone identifiers are valid
-  // for IPv6, but accepting them on IPv4 would turn malformed inputs such as
-  // "127.0.0.1%lo0" into trusted loopback addresses.
-  const raw = String(address || '').toLowerCase().replace(/^\[|\]$/g, '');
-  const family = isIP(raw);
-  if (family === 4) return inIpv4Range(raw, '127.0.0.0', 8);
-  if (family === 6) {
-    const clean = raw.split('%', 1)[0];
-    const value = ipv6ToBigInt(clean);
-    if (value === 1n) return true;
-    // IPv4-mapped loopback answers are loopback too, but only when the
-    // embedded IPv4 address belongs to 127.0.0.0/8.
-    if ((value >> 32n) === 0xffffn) {
-      const embedded = Number(value & 0xffffffffn);
-      const ipv4 = [
-        (embedded >>> 24) & 255,
-        (embedded >>> 16) & 255,
-        (embedded >>> 8) & 255,
-        embedded & 255,
-      ].join('.');
-      return inIpv4Range(ipv4, '127.0.0.0', 8);
-    }
-  }
-  return false;
 }
 
 export function createSafeUpstreamLookup(allowedHosts, lookup = dnsLookup) {
@@ -286,51 +257,90 @@ function originIsAllowed(origin, { localOnly, allowedOrigins }) {
   return localOnly && isLoopback(parsed.hostname);
 }
 
-function rejectRequest(outgoing, reason) {
+function rejectRequest(outgoing, reason, incoming) {
   log('warn', 'http.request_rejected', { reason });
   outgoing.writeHead(403, {
+    connection: 'close',
     'content-type': 'text/plain; charset=utf-8',
     'cache-control': 'no-store',
     'content-length': '9',
     'x-content-type-options': 'nosniff',
   });
+  closeAfterResponse(outgoing, incoming);
   outgoing.end('Forbidden');
 }
 
-function rejectBadRequest(outgoing, reason) {
+function rejectBadRequest(outgoing, reason, incoming) {
   log('warn', 'http.request_rejected', { reason });
   const body = 'Bad request';
   outgoing.writeHead(400, {
+    connection: 'close',
     'content-type': 'text/plain; charset=utf-8',
     'cache-control': 'no-store',
     'content-length': Buffer.byteLength(body),
     'x-content-type-options': 'nosniff',
   });
+  closeAfterResponse(outgoing, incoming);
   outgoing.end(body);
 }
 
-function rejectUnauthorized(outgoing) {
+function closeAfterResponse(outgoing, incoming) {
+  // Rejected requests must not keep attacker-controlled bodies alive on reusable
+  // connections. Flush the small error response, then close.
+  const socket = incoming?.socket ?? outgoing.socket;
+  outgoing.once('finish', () => {
+    if (!socket || socket.destroyed) return;
+    if (typeof socket.destroySoon === 'function') socket.destroySoon();
+    else socket.destroy();
+  });
+}
+
+function rejectUnauthorized(outgoing, incoming) {
   log('warn', 'http.request_rejected', { reason: 'proxy_auth_required' });
   const body = 'Unauthorized';
   outgoing.writeHead(401, {
     'www-authenticate': 'Bearer realm="mcp-inspector"',
+    connection: 'close',
     'content-type': 'text/plain; charset=utf-8',
     'cache-control': 'no-store',
     'content-length': Buffer.byteLength(body),
     'x-content-type-options': 'nosniff',
   });
+  closeAfterResponse(outgoing, incoming);
   outgoing.end(body);
 }
 
-function rejectRateLimited(outgoing, retryAfterSeconds) {
+function rejectRateLimited(outgoing, retryAfterSeconds, incoming) {
   log('warn', 'http.request_rejected', { reason: 'proxy_auth_rate_limited' });
   const body = 'Too Many Requests';
   outgoing.writeHead(429, {
     'retry-after': String(Math.max(1, retryAfterSeconds)),
+    connection: 'close',
     'content-type': 'text/plain; charset=utf-8',
     'cache-control': 'no-store',
     'content-length': Buffer.byteLength(body),
     'x-content-type-options': 'nosniff',
+  });
+  closeAfterResponse(outgoing, incoming);
+  outgoing.end(body);
+}
+
+function rejectPayloadTooLarge(outgoing, incoming) {
+  // Do not keep draining an attacker-controlled body after returning 413.
+  const socket = incoming?.socket ?? outgoing.socket;
+  log('warn', 'http.request_rejected', { reason: 'request_body_limit' });
+  const body = 'Payload Too Large';
+  outgoing.writeHead(413, {
+    connection: 'close',
+    'content-type': 'text/plain; charset=utf-8',
+    'cache-control': 'no-store',
+    'content-length': Buffer.byteLength(body),
+    'x-content-type-options': 'nosniff',
+  });
+  outgoing.once('finish', () => {
+    if (!socket || socket.destroyed) return;
+    if (typeof socket.destroySoon === 'function') socket.destroySoon();
+    else socket.destroy();
   });
   outgoing.end(body);
 }
@@ -353,6 +363,19 @@ function inspectJsonBody(inspector, chunks, totalBytes, maxBytes) {
   void inspector.observeFrame(Buffer.concat(chunks, totalBytes)).catch(() => {
     log('warn', 'rpc.inspection_failed', { transport: 'http' });
   });
+}
+
+function readMaxRequestBytes() {
+  const raw = process.env.MCP_INSPECTOR_MAX_REQUEST_BYTES;
+  if (raw === undefined) return 16 * 1024 * 1024;
+  if (!/^\d+$/.test(raw)) {
+    throw new RangeError('MCP_INSPECTOR_MAX_REQUEST_BYTES must be an integer between 1024 and 67108864');
+  }
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1024 || value > 64 * 1024 * 1024) {
+    throw new RangeError('MCP_INSPECTOR_MAX_REQUEST_BYTES must be an integer between 1024 and 67108864');
+  }
+  return value;
 }
 
 export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemote = false, contractFile, contractSource, updateContract = false } = {}) {
@@ -408,10 +431,8 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
   const sessionPendingStores = new Map();
   const authFailureLimiter = createAuthFailureLimiter();
   const maxSessionStores = 256;
-  const configuredMaxBytes = Number(process.env.MCP_INSPECTOR_MAX_FRAME_BYTES ?? 16 * 1024 * 1024);
-  const maxInspectBytes = Number.isSafeInteger(configuredMaxBytes) && configuredMaxBytes >= 1024
-    ? configuredMaxBytes
-    : 16 * 1024 * 1024;
+  const maxInspectBytes = readMaxFrameBytes();
+  const maxRequestBytes = readMaxRequestBytes();
 
   const server = createServer((incoming, outgoing) => {
     const hostHeaderCount = incoming.rawHeaders.reduce((count, name, index) =>
@@ -421,8 +442,7 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
     // Reject ambiguous duplicate credentials before Node's normalized headers
     // or an upstream intermediary can apply different duplicate-header rules.
     if (authorizationHeaderCount > 1) {
-      incoming.resume();
-      rejectBadRequest(outgoing, 'duplicate_authorization');
+      rejectBadRequest(outgoing, 'duplicate_authorization', incoming);
       return;
     }
     const requestHostname = hostHeaderHostname(incoming.headers.host);
@@ -431,14 +451,12 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
     // Loopback listeners also restrict the authority to loopback so DNS aliases
     // cannot bypass the local-only boundary.
     if (hostHeaderCount !== 1 || !requestHostname || (localOnly && !isLoopback(requestHostname))) {
-      incoming.resume();
-      rejectRequest(outgoing, 'invalid_host');
+      rejectRequest(outgoing, 'invalid_host', incoming);
       return;
     }
     const origin = incoming.headers.origin;
     if (origin !== undefined && !originIsAllowed(origin, { localOnly, allowedOrigins })) {
-      incoming.resume();
-      rejectRequest(outgoing, 'origin_not_allowed');
+      rejectRequest(outgoing, 'origin_not_allowed', incoming);
       return;
     }
     const corsHeaders = origin ? {
@@ -446,6 +464,13 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
       'vary': 'Origin',
     } : {};
     if (incoming.method === 'OPTIONS' && incoming.headers['access-control-request-method']) {
+      const declaredPreflightLength = incoming.headers['content-length'];
+      const hasPreflightBody = incoming.headers['transfer-encoding'] !== undefined ||
+        (declaredPreflightLength !== undefined && Number(declaredPreflightLength) > 0);
+      if (hasPreflightBody) {
+        rejectBadRequest(outgoing, 'preflight_body_not_allowed', incoming);
+        return;
+      }
       const requestedMethod = String(incoming.headers['access-control-request-method']).toUpperCase();
       const allowedMethods = new Set(['GET', 'POST', 'DELETE', 'OPTIONS']);
       const requestedHeaders = String(incoming.headers['access-control-request-headers'] || '')
@@ -455,8 +480,7 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
         'mcp-session-id', 'last-event-id', 'if-none-match', 'if-match',
       ]);
       if (!allowedMethods.has(requestedMethod) || requestedHeaders.some((header) => !allowedHeaders.has(header))) {
-        incoming.resume();
-        rejectRequest(outgoing, 'preflight_not_allowed');
+        rejectRequest(outgoing, 'preflight_not_allowed', incoming);
         return;
       }
       incoming.resume();
@@ -474,9 +498,10 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
       const peerAddress = incoming.socket.remoteAddress;
       if (!hasValidBearerToken(incoming.headers.authorization, configuredProxyToken)) {
         const retryAfterSeconds = authFailureLimiter.recordFailure(peerAddress);
-        incoming.resume();
-        if (retryAfterSeconds > 0) rejectRateLimited(outgoing, retryAfterSeconds);
-        else rejectUnauthorized(outgoing);
+        // Do not drain an unauthenticated body. The rejection response closes
+        // the connection after it is flushed, bounding work before body parsing.
+        if (retryAfterSeconds > 0) rejectRateLimited(outgoing, retryAfterSeconds, incoming);
+        else rejectUnauthorized(outgoing, incoming);
         return;
       }
       authFailureLimiter.clear(peerAddress);
@@ -486,16 +511,19 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
     // outbound URL from a client-controlled absolute/network-path reference.
     const targetPath = incoming.url || '/';
     if (!targetPath.startsWith('/') || targetPath.startsWith('//') || /[\\#\u0000-\u001f\u007f]/.test(targetPath)) {
-      incoming.resume();
-      outgoing.writeHead(400, {
-        ...corsHeaders,
-        'content-type': 'text/plain; charset=utf-8',
-        'cache-control': 'no-store',
-        'content-length': '11',
-        'x-content-type-options': 'nosniff',
-      });
-      outgoing.end('Bad request');
+      rejectBadRequest(outgoing, 'invalid_request_target', incoming);
       return;
+    }
+
+    // Reject oversized declared bodies before allocating session state or opening
+    // an upstream request. Chunked bodies are checked while they stream.
+    const declaredLengthHeader = incoming.headers['content-length'];
+    if (declaredLengthHeader !== undefined) {
+      const declaredLength = Number(declaredLengthHeader);
+      if (Number.isSafeInteger(declaredLength) && declaredLength > maxRequestBytes) {
+        rejectPayloadTooLarge(outgoing, incoming);
+        return;
+      }
     }
 
     // JSON-RPC identifiers are scoped to a connection/session. Modern stateless
@@ -554,6 +582,8 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
     const token = process.env.MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN;
     if (token) headers.authorization = `Bearer ${token}`;
     const requestFn = upstreamUrl.protocol === 'https:' ? httpsRequest : httpRequest;
+    let forwardedRequestBytes = 0;
+    let requestTooLarge = false;
     const upstreamReq = requestFn(upstreamUrl, { method: incoming.method, path: targetPath, headers, lookup: safeUpstreamLookup }, (upstreamRes) => {
       const responseHeaders = filterHopHeaders(upstreamRes.headers);
       responseHeaders['cache-control'] = responseHeaders['cache-control'] || 'no-store';
@@ -617,6 +647,7 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
       upstreamReq.destroy(new Error('Upstream inactivity timeout'));
     });
     upstreamReq.on('error', (error) => {
+      if (requestTooLarge) return;
       logError('http.upstream_error', error, { method: incoming.method, path: safePath(incoming.url) });
       if (!outgoing.headersSent) outgoing.writeHead(502, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
       if (!outgoing.destroyed) outgoing.end('MCP upstream unavailable');
@@ -624,18 +655,53 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
     outgoing.on('close', () => {
       if (!upstreamReq.destroyed && !upstreamReq.writableEnded) upstreamReq.destroy();
     });
-    // Register the byte-forwarding pipe before side-channel inspection listeners.
-    incoming.pipe(upstreamReq);
+    // Enforce the raw request-body cap before forwarding each chunk. Explicit
+    // writes ensure the chunk that crosses the limit is never sent upstream.
+    incoming.on('data', (chunk) => {
+      if (requestTooLarge) return;
+      forwardedRequestBytes += chunk.length;
+      if (forwardedRequestBytes > maxRequestBytes) {
+        requestTooLarge = true;
+        log('warn', 'http.request_rejected', {
+          reason: 'request_body_limit',
+          bytes: forwardedRequestBytes,
+          max_bytes: maxRequestBytes,
+        });
+        incoming.pause();
+        if (!outgoing.headersSent && !outgoing.destroyed) rejectPayloadTooLarge(outgoing, incoming);
+        else if (!outgoing.destroyed) outgoing.destroy();
+        upstreamReq.destroy(new Error('Request body limit exceeded'));
+        return;
+      }
+      if (!upstreamReq.write(chunk)) incoming.pause();
+    });
+    incoming.on('end', () => {
+      if (!requestTooLarge && !upstreamReq.destroyed && !upstreamReq.writableEnded) upstreamReq.end();
+    });
+    incoming.on('aborted', () => {
+      if (!upstreamReq.destroyed) upstreamReq.destroy(new Error('Client aborted request'));
+    });
+    incoming.on('error', (error) => {
+      if (!upstreamReq.destroyed) upstreamReq.destroy(error);
+    });
+    upstreamReq.on('drain', () => {
+      if (!requestTooLarge && !incoming.destroyed) incoming.resume();
+    });
 
     const requestContentType = String(incoming.headers['content-type'] || '').toLowerCase();
     const requestEncoding = String(incoming.headers['content-encoding'] || 'identity').toLowerCase();
     const requestChunks = [];
-    let requestBytes = 0;
+    let requestInspectBytes = 0;
     let requestInspectDisabled = false;
     if ((requestEncoding === 'identity' || requestEncoding === '') && requestContentType.includes('application/json')) {
       incoming.on('data', (chunk) => {
-        requestBytes += chunk.length;
-        if (requestBytes > maxInspectBytes) {
+        if (requestTooLarge) {
+          requestInspectDisabled = true;
+          requestChunks.length = 0;
+          return;
+        }
+        requestInspectBytes += chunk.length;
+        if (requestInspectBytes > maxInspectBytes) {
           requestInspectDisabled = true;
           requestChunks.length = 0;
         } else if (!requestInspectDisabled) {
@@ -643,8 +709,11 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
         }
       });
       incoming.on('end', () => {
-        if (!requestInspectDisabled) inspectJsonBody(ingressInspector, requestChunks, requestBytes, maxInspectBytes);
-        else log('warn', 'http.inspect_skipped', { reason: 'request_body_limit', bytes: requestBytes, max_bytes: maxInspectBytes });
+        if (!requestTooLarge && !requestInspectDisabled) {
+          inspectJsonBody(ingressInspector, requestChunks, requestInspectBytes, maxInspectBytes);
+        } else if (!requestTooLarge) {
+          log('warn', 'http.inspect_skipped', { reason: 'request_body_limit', bytes: requestInspectBytes, max_bytes: maxInspectBytes });
+        }
       });
     }
 
