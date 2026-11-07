@@ -2,10 +2,29 @@ import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 
+
+/**
+ * Validate an OAuth scope value against RFC 6749's scope-token grammar.
+ * Reject control characters, non-ASCII tokens, quotes, backslashes and empty
+ * tokens before the SDK constructs a token request.
+ */
+export function validateOAuthRefreshScope(value) {
+  if (value === undefined) return undefined;
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    value.length > 2048 ||
+    !/^[\\x21\\x23-\\x5B\\x5D-\\x7E]+(?: [\\x21\\x23-\\x5B\\x5D-\\x7E]+)*$/.test(value)
+  ) {
+    throw new TypeError('oauthRefreshScope must be a valid RFC 6749 scope string: non-empty ASCII scope tokens separated by single spaces, up to 2048 characters');
+  }
+  return value;
+}
+
 export class InMemoryOAuthProvider {
   constructor(redirectUrl, { refreshScope } = {}) {
     this.redirectUrl = redirectUrl;
-    this.refreshScope = refreshScope;
+    this.refreshScope = validateOAuthRefreshScope(refreshScope);
     this.clientMetadata = {
       client_name: 'MCP Inspector',
       redirect_uris: [redirectUrl],
@@ -90,6 +109,7 @@ export class InMemoryOAuthProvider {
  * rendered or logged. Tokens are kept in memory only for this CLI run.
  */
 export async function createOAuthContext({ refreshScope } = {}) {
+  const validatedRefreshScope = validateOAuthRefreshScope(refreshScope);
   let provider;
   let waiting = null;
   let completedParams;
@@ -140,7 +160,7 @@ export async function createOAuthContext({ refreshScope } = {}) {
   await once(server, 'listening');
   port = server.address().port;
   const redirectUrl = 'http://127.0.0.1:' + port + '/callback';
-  provider = new InMemoryOAuthProvider(redirectUrl, { refreshScope });
+  provider = new InMemoryOAuthProvider(redirectUrl, { refreshScope: validatedRefreshScope });
 
   function waitForCallback({ timeoutMs = 300_000, signal } = {}) {
     if (completedParams) {
