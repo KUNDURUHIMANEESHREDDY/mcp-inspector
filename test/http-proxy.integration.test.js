@@ -557,3 +557,100 @@ test('HTTP proxy bounds incomplete request-header time and keeps request-body ti
   assert.equal(proxy.server.requestTimeout, 300_000);
   assert.equal(proxy.server.keepAliveTimeout, 5_000);
 });
+
+
+test('remote HTTP proxy requires a shared bearer token and exact Origin allowlist', { skip: !startHttpProxy }, async (t) => {
+  const envNames = ['MCP_INSPECTOR_PROXY_BEARER_TOKEN', 'MCP_INSPECTOR_ALLOWED_ORIGINS'];
+  const previousEnv = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
+  let upstream;
+  let proxy;
+  try {
+    delete process.env.MCP_INSPECTOR_PROXY_BEARER_TOKEN;
+    process.env.MCP_INSPECTOR_ALLOWED_ORIGINS = 'http://localhost:3000';
+    assert.throws(
+      () => startHttpProxy({ upstream: 'http://127.0.0.1:3000', listen: '0.0.0.0:0', allowRemote: true }),
+      /MCP_INSPECTOR_PROXY_BEARER_TOKEN/,
+    );
+
+    process.env.MCP_INSPECTOR_PROXY_BEARER_TOKEN = 'test-client-token-with-at-least-32-characters';
+    delete process.env.MCP_INSPECTOR_ALLOWED_ORIGINS;
+    assert.throws(
+      () => startHttpProxy({ upstream: 'http://127.0.0.1:3000', listen: '0.0.0.0:0', allowRemote: true }),
+      /MCP_INSPECTOR_ALLOWED_ORIGINS/,
+    );
+
+    process.env.MCP_INSPECTOR_ALLOWED_ORIGINS = 'http://localhost:3000';
+    upstream = createServer((request, response) => {
+      request.resume();
+      response.writeHead(200, { 'content-type': 'text/plain' });
+      response.end('upstream reached');
+    });
+    upstream.listen(0, '127.0.0.1');
+    await once(upstream, 'listening');
+    const upstreamPort = upstream.address().port;
+    proxy = startHttpProxy({
+      upstream: 'http://127.0.0.1:' + upstreamPort,
+      listen: '0.0.0.0:0',
+      allowRemote: true,
+    });
+    if (!proxy.server.listening) await once(proxy.server, 'listening');
+    const proxyPort = proxy.server.address().port;
+
+    const send = (headers = {}) => new Promise((resolve, reject) => {
+      const request = httpRequest({
+        hostname: '127.0.0.1',
+        port: proxyPort,
+        path: '/mcp',
+        method: 'GET',
+        headers,
+      }, (response) => {
+        const chunks = [];
+        response.on('data', (chunk) => chunks.push(chunk));
+        response.on('end', () => resolve({
+          status: response.statusCode,
+          body: Buffer.concat(chunks).toString('utf8'),
+          headers: response.headers,
+        }));
+      });
+      request.on('error', reject);
+      request.end();
+    });
+
+    const unauthenticated = await send();
+    assert.equal(unauthenticated.status, 401);
+    assert.equal(unauthenticated.body, 'Unauthorized');
+    assert.equal(unauthenticated.headers.connection, 'close');
+
+    const preflight = await send({
+      origin: 'http://localhost:3000',
+      'access-control-request-method': 'POST',
+    });
+    // A browser preflight is allowed before the bearer-authenticated request.
+    assert.equal(preflight.status, 204);
+
+    const forbiddenOrigin = await send({
+      origin: 'https://attacker.example',
+      authorization: 'Bearer test-client-token-with-at-least-32-characters',
+    });
+    assert.equal(forbiddenOrigin.status, 403);
+
+    for (let attempt = 0; attempt < 9; attempt += 1) await send({ authorization: 'Bearer wrong-token' });
+    const rateLimited = await send({ authorization: 'Bearer wrong-token' });
+    assert.equal(rateLimited.status, 429);
+    assert.ok(Number(rateLimited.headers['retry-after']) >= 1);
+
+    const authorized = await send({
+      origin: 'http://localhost:3000',
+      authorization: 'Bearer test-client-token-with-at-least-32-characters',
+    });
+    assert.equal(authorized.status, 200);
+    assert.equal(authorized.body, 'upstream reached');
+  } finally {
+    if (proxy) await proxy.close();
+    if (upstream) await new Promise((resolve) => upstream.close(resolve));
+    for (const name of envNames) {
+      if (previousEnv[name] === undefined) delete process.env[name];
+      else process.env[name] = previousEnv[name];
+    }
+  }
+});
