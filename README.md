@@ -4,7 +4,7 @@
 
 MCP Inspector is a local-first CLI with a built-in web dashboard. It sits between an MCP client and server or proxies Streamable HTTP traffic. It forwards original transport bytes and performs bounded, side-channel inspection so teams can investigate latency, JSON-RPC failures, tool-schema drift, and edge-case tool handling without logging prompts or tool arguments by default.
 
-> **Release status:** early-stage software. Unit and local proxy tests are available, and an official-SDK interoperability suite is included for CI. Run the full dependency-backed suite, inspect the SBOM and audit findings, and benchmark your own servers before production use. Remote HTTP binding is not an authenticated gateway.
+> **Release status:** early-stage software. Unit and local proxy tests are available, and an official-SDK interoperability suite is included for CI. Run the full dependency-backed suite, inspect the SBOM and audit findings, and benchmark your own servers before production use. Non-loopback HTTP binds require a 32-character shared proxy bearer token and an exact Origin allowlist; this is defense-in-depth, not per-user identity or a replacement for a TLS-terminating, rate-limiting gateway.
 
 ## Windows quick start
 
@@ -68,7 +68,7 @@ Point the MCP client at `http://127.0.0.1:9900/mcp` if your upstream endpoint is
 
 For a private upstream, set `MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN` in the process environment. Credentials are not read from the upstream URL. The token is sent only over HTTPS for non-loopback upstream hosts.
 
-**Do not add `--allow-remote` unless you have placed an authenticated, TLS-terminating, rate-limiting gateway in front of the proxy.** That flag only changes the bind check; it does not add authentication, authorization, TLS, or rate limits.
+**Do not add `--allow-remote` unless you have placed an authenticated, TLS-terminating, rate-limiting gateway in front of the proxy.** A non-loopback bind also requires `MCP_INSPECTOR_PROXY_BEARER_TOKEN` (at least 32 characters) and `MCP_INSPECTOR_ALLOWED_ORIGINS` (a comma-separated exact Origin allowlist). The shared token is checked with a constant-time comparison and failed attempts are throttled per peer. It is defense-in-depth only: it does not provide per-user identity, RBAC, TLS, or a substitute for the gateway.
 
 ### 3. Capture a tool contract
 

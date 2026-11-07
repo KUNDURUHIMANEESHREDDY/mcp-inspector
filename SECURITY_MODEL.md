@@ -9,6 +9,7 @@ MCP Inspector is a local developer diagnostic tool and protocol observer. It is 
 - MCP payloads: prompts, tool arguments, and tool results may contain credentials or personal data. The observer must not persist or export them by default.
 - Endpoint configuration: the configured upstream URL and bearer token are trusted operator configuration. Do not embed credentials in URLs or pass secrets as command-line arguments.
 - Dashboard browser boundary: the dashboard is intended for a local browser and binds to loopback. Host and Origin checks are defenses against DNS rebinding and cross-site request forgery, not a substitute for authentication on remote deployments.
+- Remote HTTP proxy clients: non-loopback binds require a shared bearer token of at least 32 characters and an exact Origin allowlist. The token is compared in constant time, failed attempts are throttled per peer, duplicate Authorization fields are rejected, and the client credential is removed before forwarding upstream. This is defense-in-depth only: it is not per-user identity or RBAC and does not provide TLS. Keep remote listeners behind a TLS-terminating, rate-limiting gateway.
 - Trace and contract files: tool names, schema properties, endpoint paths, server identity and stack/error metadata may still be sensitive. Store exports with the same care as logs.
 
 ## Controls implemented in this repository
