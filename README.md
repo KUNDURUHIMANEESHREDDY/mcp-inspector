@@ -196,6 +196,7 @@ Set these environment variables only when needed:
 | `MCP_INSPECTOR_MAX_PENDING_REQUESTS` | `10000` | Maximum pending RPC correlations per transport store |
 | `MCP_INSPECTOR_SESSION_IDLE_MS` | `1800000` | Legacy HTTP session idle TTL, 1 minute to 24 hours |
 | `MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN` | unset | Optional bearer token for the configured HTTP upstream |
+| `MCP_INSPECTOR_OAUTH_REFRESH_SCOPE` | unset | Optional space-delimited scopes sent only on OAuth token refresh; requires `--oauth` |
 | `MCP_INSPECTOR_UPSTREAM_TIMEOUT_MS` | `120000` | Upstream inactivity timeout, from 1 second to 1 hour |
 | `MCP_INSPECTOR_ALLOWED_ORIGINS` | unset | Exact comma-separated browser Origin allowlist; required for remote browser access |
 
