@@ -177,7 +177,7 @@ export async function runCompatibilitySuite({
   if (oauth && !transports.includes('http')) throw new TypeError('OAuth can only be used with the HTTP transport');
   if (oauthRefreshScope !== undefined) {
     if (!oauth) throw new TypeError('OAuth refresh scope requires OAuth to be enabled');
-    if (typeof oauthRefreshScope !== 'string' || !oauthRefreshScope.trim() || oauthRefreshScope.length > 2048 || /[\\r\\n\\u0000]/.test(oauthRefreshScope)) {
+    if (typeof oauthRefreshScope !== 'string' || !oauthRefreshScope.trim() || oauthRefreshScope.length > 2048 || /[\r\n\u0000]/.test(oauthRefreshScope)) {
       throw new TypeError('oauthRefreshScope must be a non-empty scope string up to 2048 characters without control line breaks');
     }
   }
