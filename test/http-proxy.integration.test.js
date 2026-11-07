@@ -564,6 +564,7 @@ test('remote HTTP proxy requires a shared bearer token and exact Origin allowlis
   const previousEnv = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
   let upstream;
   let proxy;
+  let receivedAuthorization;
   try {
     delete process.env.MCP_INSPECTOR_PROXY_BEARER_TOKEN;
     process.env.MCP_INSPECTOR_ALLOWED_ORIGINS = 'http://localhost:3000';
@@ -581,6 +582,7 @@ test('remote HTTP proxy requires a shared bearer token and exact Origin allowlis
 
     process.env.MCP_INSPECTOR_ALLOWED_ORIGINS = 'http://localhost:3000';
     upstream = createServer((request, response) => {
+      receivedAuthorization = request.headers.authorization;
       request.resume();
       response.writeHead(200, { 'content-type': 'text/plain' });
       response.end('upstream reached');
@@ -596,12 +598,12 @@ test('remote HTTP proxy requires a shared bearer token and exact Origin allowlis
     if (!proxy.server.listening) await once(proxy.server, 'listening');
     const proxyPort = proxy.server.address().port;
 
-    const send = (headers = {}) => new Promise((resolve, reject) => {
+    const send = (headers = {}, method = 'GET') => new Promise((resolve, reject) => {
       const request = httpRequest({
         hostname: '127.0.0.1',
         port: proxyPort,
         path: '/mcp',
-        method: 'GET',
+        method,
         headers,
       }, (response) => {
         const chunks = [];
@@ -624,9 +626,30 @@ test('remote HTTP proxy requires a shared bearer token and exact Origin allowlis
     const preflight = await send({
       origin: 'http://localhost:3000',
       'access-control-request-method': 'POST',
-    });
+    }, 'OPTIONS');
     // A browser preflight is allowed before the bearer-authenticated request.
     assert.equal(preflight.status, 204);
+
+    const duplicateAuthorization = await new Promise((resolve, reject) => {
+      const socket = netConnect(proxyPort, '127.0.0.1');
+      let response = '';
+      socket.setEncoding('utf8');
+      socket.on('data', (chunk) => { response += chunk; });
+      socket.on('end', () => resolve(response));
+      socket.on('error', reject);
+      socket.on('connect', () => {
+        socket.write([
+          'GET /mcp HTTP/1.1',
+          'Host: 127.0.0.1:' + proxyPort,
+          'Authorization: Bearer first-token',
+          'Authorization: Bearer second-token',
+          'Connection: close',
+          '',
+          '',
+        ].join('\r\n'));
+      });
+    });
+    assert.ok(duplicateAuthorization.startsWith('HTTP/1.1 401 '));
 
     const forbiddenOrigin = await send({
       origin: 'https://attacker.example',
@@ -634,7 +657,7 @@ test('remote HTTP proxy requires a shared bearer token and exact Origin allowlis
     });
     assert.equal(forbiddenOrigin.status, 403);
 
-    for (let attempt = 0; attempt < 9; attempt += 1) await send({ authorization: 'Bearer wrong-token' });
+    for (let attempt = 0; attempt < 8; attempt += 1) await send({ authorization: 'Bearer wrong-token' });
     const rateLimited = await send({ authorization: 'Bearer wrong-token' });
     assert.equal(rateLimited.status, 429);
     assert.ok(Number(rateLimited.headers['retry-after']) >= 1);
@@ -645,6 +668,7 @@ test('remote HTTP proxy requires a shared bearer token and exact Origin allowlis
     });
     assert.equal(authorized.status, 200);
     assert.equal(authorized.body, 'upstream reached');
+    assert.equal(receivedAuthorization, undefined, 'the proxy client token must not be forwarded upstream');
   } finally {
     if (proxy) await proxy.close();
     if (upstream) await new Promise((resolve) => upstream.close(resolve));
