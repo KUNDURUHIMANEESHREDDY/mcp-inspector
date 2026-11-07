@@ -4,14 +4,14 @@ import { request as httpRequest } from 'node:http';
 import { startDashboardServer } from '../src/dashboard/server.js';
 import { publishDashboardEvent, resetDashboardEventStore } from '../src/dashboard/event-store.js';
 
-function request(port, { path = '/', method = 'GET', headers = {} } = {}) {
+function request(port, { hostname = '127.0.0.1', host = '127.0.0.1:' + port, path = '/', method = 'GET', headers = {} } = {}) {
   return new Promise((resolve, reject) => {
     const req = httpRequest({
-      hostname: '127.0.0.1',
+      hostname,
       port,
       path,
       method,
-      headers: { host: '127.0.0.1:' + port, ...headers },
+      headers: { host, ...headers },
     }, (res) => {
       const chunks = [];
       res.on('data', (chunk) => chunks.push(chunk));
@@ -74,6 +74,19 @@ test('dashboard rejects hostile origins, spoofed hosts, mutation methods and unk
   assert.equal((await request(port, { headers: { host: 'localhost.attacker.invalid:' + port } })).status, 403);
   assert.equal((await request(port, { method: 'POST', path: '/api/anything' })).status, 405);
   assert.equal((await request(port, { path: '/../../package.json' })).status, 404);
+});
+
+test('dashboard accepts the full IPv4 loopback range for bind, Host and Origin', async (t) => {
+  const dashboard = await startDashboardServer({ listen: '127.0.0.2:0' });
+  const port = dashboard.server.address().port;
+  t.after(() => dashboard.close());
+
+  const response = await request(port, {
+    hostname: '127.0.0.2',
+    host: '127.0.0.2:' + port,
+    headers: { origin: 'http://127.0.0.2:' + port },
+  });
+  assert.equal(response.status, 200);
 });
 
 test('dashboard listener refuses non-loopback binding', async () => {
