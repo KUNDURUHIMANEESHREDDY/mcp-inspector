@@ -26,7 +26,7 @@ test('compatibility summaries fail closed for failed or cancelled probes', () =>
 });
 
 
-test('OAuth refresh scope is opt-in and rejects unsafe values before connecting', async () => {
+test('OAuth refresh scope is opt-in and follows RFC 6749 scope-token grammar before connecting', async () => {
   const target = {
     transports: ['http'],
     protocols: ['legacy'],
@@ -36,12 +36,23 @@ test('OAuth refresh scope is opt-in and rejects unsafe values before connecting'
     runCompatibilitySuite({ ...target, oauthRefreshScope: 'openid offline_access' }),
     /requires OAuth to be enabled/,
   );
-  await assert.rejects(
-    runCompatibilitySuite({ ...target, oauth: true, oauthRefreshScope: 'openid\nadmin' }),
-    /without control line breaks/,
-  );
-  await assert.rejects(
-    runCompatibilitySuite({ ...target, oauth: true, oauthRefreshScope: 'x'.repeat(2049) }),
-    /up to 2048 characters/,
-  );
+  for (const oauthRefreshScope of [
+    '',
+    ' ',
+    ' openid',
+    'openid ',
+    'openid  offline_access',
+    'openid\\tadmin',
+    'openid\\r\\nadmin',
+    'openid"admin',
+    'openid\\\\admin',
+    'openid café',
+    'x'.repeat(2049),
+  ]) {
+    await assert.rejects(
+      runCompatibilitySuite({ ...target, oauth: true, oauthRefreshScope }),
+      /valid RFC 6749 scope string/,
+      JSON.stringify(oauthRefreshScope),
+    );
+  }
 });
