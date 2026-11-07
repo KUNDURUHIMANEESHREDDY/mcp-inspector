@@ -251,14 +251,30 @@ function originIsAllowed(origin, { localOnly, allowedOrigins }) {
   return localOnly && isLoopback(parsed.hostname);
 }
 
-function rejectRequest(outgoing, reason) {
+function rejectBadRequest(outgoing, reason, incoming) {
+  log('warn', 'http.request_rejected', { reason });
+  const body = 'Bad request';
+  outgoing.writeHead(400, {
+    connection: 'close',
+    'content-type': 'text/plain; charset=utf-8',
+    'cache-control': 'no-store',
+    'content-length': Buffer.byteLength(body),
+    'x-content-type-options': 'nosniff',
+  });
+  closeAfterResponse(outgoing, incoming);
+  outgoing.end(body);
+}
+
+function rejectRequest(outgoing, reason, incoming) {
   log('warn', 'http.request_rejected', { reason });
   outgoing.writeHead(403, {
+    connection: 'close',
     'content-type': 'text/plain; charset=utf-8',
     'cache-control': 'no-store',
     'content-length': '9',
     'x-content-type-options': 'nosniff',
   });
+  closeAfterResponse(outgoing, incoming);
   outgoing.end('Forbidden');
 }
 
@@ -414,16 +430,23 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
   const maxRequestBytes = readMaxRequestBytes();
 
   const server = createServer((incoming, outgoing) => {
+    const hostHeaderCount = incoming.rawHeaders.reduce((count, name, index) =>
+      index % 2 === 0 && name.toLowerCase() === 'host' ? count + 1 : count, 0);
     const requestHostname = hostHeaderHostname(incoming.headers.host);
-    if (localOnly && (!requestHostname || !isLoopback(requestHostname))) {
-      incoming.resume();
-      rejectRequest(outgoing, 'invalid_host');
+    // HTTP/1.1 requires exactly one valid Host authority. Reject duplicate or
+    // missing Host fields rather than relying on parser/intermediary precedence.
+    if (hostHeaderCount !== 1 || !requestHostname) {
+      rejectBadRequest(outgoing, 'invalid_host', incoming);
+      return;
+    }
+    if (localOnly && !isLoopback(requestHostname)) {
+      rejectRequest(outgoing, 'invalid_host', incoming);
       return;
     }
     const origin = incoming.headers.origin;
     if (origin !== undefined && !originIsAllowed(origin, { localOnly, allowedOrigins })) {
       incoming.resume();
-      rejectRequest(outgoing, 'origin_not_allowed');
+      rejectRequest(outgoing, 'origin_not_allowed', incoming);
       return;
     }
     const corsHeaders = origin ? {
@@ -431,6 +454,13 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
       'vary': 'Origin',
     } : {};
     if (incoming.method === 'OPTIONS' && incoming.headers['access-control-request-method']) {
+      const declaredPreflightLength = incoming.headers['content-length'];
+      const hasPreflightBody = incoming.headers['transfer-encoding'] !== undefined ||
+        (declaredPreflightLength !== undefined && Number(declaredPreflightLength) > 0);
+      if (hasPreflightBody) {
+        rejectBadRequest(outgoing, 'preflight_body_not_allowed', incoming);
+        return;
+      }
       const requestedMethod = String(incoming.headers['access-control-request-method']).toUpperCase();
       const allowedMethods = new Set(['GET', 'POST', 'DELETE', 'OPTIONS']);
       const requestedHeaders = String(incoming.headers['access-control-request-headers'] || '')
@@ -440,8 +470,7 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
         'mcp-session-id', 'last-event-id', 'if-none-match', 'if-match',
       ]);
       if (!allowedMethods.has(requestedMethod) || requestedHeaders.some((header) => !allowedHeaders.has(header))) {
-        incoming.resume();
-        rejectRequest(outgoing, 'preflight_not_allowed');
+        rejectRequest(outgoing, 'preflight_not_allowed', incoming);
         return;
       }
       incoming.resume();
@@ -478,15 +507,7 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
     // outbound URL from a client-controlled absolute/network-path reference.
     const targetPath = incoming.url || '/';
     if (!targetPath.startsWith('/') || targetPath.startsWith('//') || /[\\#\u0000-\u001f\u007f]/.test(targetPath)) {
-      incoming.resume();
-      outgoing.writeHead(400, {
-        ...corsHeaders,
-        'content-type': 'text/plain; charset=utf-8',
-        'cache-control': 'no-store',
-        'content-length': '11',
-        'x-content-type-options': 'nosniff',
-      });
-      outgoing.end('Bad request');
+      rejectBadRequest(outgoing, 'invalid_request_target', incoming);
       return;
     }
 

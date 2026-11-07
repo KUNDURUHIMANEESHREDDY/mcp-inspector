@@ -222,7 +222,7 @@ test('HTTP proxy blocks cross-site browser Origins and spoofed Host headers befo
     `127.0.0.1:${proxyAddress.port}%00`,
     `127.0.0.1:\\${proxyAddress.port}`,
   ]) {
-    assert.equal((await send({ host: malformedHost })).status, 403, `reject malformed Host: ${malformedHost}`);
+    assert.equal((await send({ host: malformedHost })).status, 400, `reject malformed Host: ${malformedHost}`);
   }
   for (const host of [
     `127.0.0.1:${proxyAddress.port}?unexpected`,
@@ -233,7 +233,7 @@ test('HTTP proxy blocks cross-site browser Origins and spoofed Host headers befo
     `0x7f000001:${proxyAddress.port}`,
   ]) {
     const malformedHost = await send({ host });
-    assert.equal(malformedHost.status, 403, `malformed Host must be rejected: ${host}`);
+    assert.equal(malformedHost.status, 400, `malformed Host must be rejected: ${host}`);
   }
   assert.equal(upstreamCalls, 0, 'rejected browser requests must never reach upstream');
 
@@ -814,4 +814,90 @@ test('HTTP proxy rejects invalid request-body limit configuration at startup', {
     if (previousLimit === undefined) delete process.env.MCP_INSPECTOR_MAX_REQUEST_BYTES;
     else process.env.MCP_INSPECTOR_MAX_REQUEST_BYTES = previousLimit;
   }
+});
+
+
+test('HTTP proxy rejects duplicate Host headers before contacting upstream', { skip: !startHttpProxy }, async (t) => {
+  let upstreamCalls = 0;
+  const upstream = createServer((request, response) => {
+    upstreamCalls += 1;
+    request.resume();
+    response.writeHead(200);
+    response.end('upstream reached');
+  });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  const proxy = startHttpProxy({ upstream: 'http://127.0.0.1:' + upstream.address().port, listen: '127.0.0.1:0' });
+  if (!proxy.server.listening) await once(proxy.server, 'listening');
+  const proxyPort = proxy.server.address().port;
+  t.after(async () => {
+    await proxy.close();
+    await new Promise((resolve) => upstream.close(resolve));
+  });
+
+  const response = await new Promise((resolve, reject) => {
+    const socket = netConnect(proxyPort, '127.0.0.1');
+    let data = '';
+    socket.setEncoding('utf8');
+    socket.on('data', (chunk) => { data += chunk; });
+    socket.on('end', () => resolve(data));
+    socket.on('error', reject);
+    socket.on('connect', () => {
+      socket.write([
+        'GET /mcp HTTP/1.1',
+        'Host: 127.0.0.1:' + proxyPort,
+        'Host: attacker.example',
+        'Connection: close',
+        '',
+        '',
+      ].join('\r\n'));
+    });
+  });
+
+  assert.ok(response.startsWith('HTTP/1.1 400 '));
+  assert.equal(upstreamCalls, 0);
+});
+
+test('HTTP proxy rejects preflight OPTIONS requests with bodies', { skip: !startHttpProxy }, async (t) => {
+  let upstreamCalls = 0;
+  const upstream = createServer((request, response) => {
+    upstreamCalls += 1;
+    request.resume();
+    response.writeHead(200);
+    response.end('upstream reached');
+  });
+  upstream.listen(0, '127.0.0.1');
+  await once(upstream, 'listening');
+  const proxy = startHttpProxy({ upstream: 'http://127.0.0.1:' + upstream.address().port, listen: '127.0.0.1:0' });
+  if (!proxy.server.listening) await once(proxy.server, 'listening');
+  const proxyPort = proxy.server.address().port;
+  t.after(async () => {
+    await proxy.close();
+    await new Promise((resolve) => upstream.close(resolve));
+  });
+
+  const result = await new Promise((resolve, reject) => {
+    const request = httpRequest({
+      hostname: '127.0.0.1',
+      port: proxyPort,
+      path: '/mcp',
+      method: 'OPTIONS',
+      headers: {
+        origin: 'http://127.0.0.1:3000',
+        'access-control-request-method': 'POST',
+        'content-length': '1',
+      },
+    }, (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
+      response.on('error', reject);
+    });
+    request.on('error', reject);
+    request.end('x');
+  });
+
+  assert.equal(result.status, 400);
+  assert.equal(result.body, 'Bad request');
+  assert.equal(upstreamCalls, 0);
 });
