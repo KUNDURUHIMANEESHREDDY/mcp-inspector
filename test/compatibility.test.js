@@ -37,7 +37,7 @@ test('OAuth refresh scope is opt-in and rejects unsafe values before connecting'
     /requires OAuth to be enabled/,
   );
   await assert.rejects(
-    runCompatibilitySuite({ ...target, oauth: true, oauthRefreshScope: 'openid\\nadmin' }),
+    runCompatibilitySuite({ ...target, oauth: true, oauthRefreshScope: 'openid\nadmin' }),
     /without control line breaks/,
   );
   await assert.rejects(
