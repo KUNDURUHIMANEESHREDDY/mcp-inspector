@@ -63,10 +63,10 @@ test('OAuth provider validates refresh scopes before opening a callback listener
     ' openid',
     'openid ',
     'openid  offline_access',
-    'openid\\tadmin',
-    'openid\\r\\nadmin',
+    'openid\tadmin',
+    'openid\r\nadmin',
     'openid"admin',
-    'openid\\\\admin',
+    'openid\\admin',
     'openid café',
     'x'.repeat(2049),
   ];
