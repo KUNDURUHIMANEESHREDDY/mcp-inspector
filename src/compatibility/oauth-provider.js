@@ -14,7 +14,7 @@ export function validateOAuthRefreshScope(value) {
     typeof value !== 'string' ||
     value.length === 0 ||
     value.length > 2048 ||
-    !/^[\\x21\\x23-\\x5B\\x5D-\\x7E]+(?: [\\x21\\x23-\\x5B\\x5D-\\x7E]+)*$/.test(value)
+    !/^[\x21\x23-\x5B\x5D-\x7E]+(?: [\x21\x23-\x5B\x5D-\x7E]+)*$/.test(value)
   ) {
     throw new TypeError('oauthRefreshScope must be a valid RFC 6749 scope string: non-empty ASCII scope tokens separated by single spaces, up to 2048 characters');
   }
