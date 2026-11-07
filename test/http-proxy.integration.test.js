@@ -222,7 +222,7 @@ test('HTTP proxy blocks cross-site browser Origins and spoofed Host headers befo
     `127.0.0.1:${proxyAddress.port}%00`,
     `127.0.0.1:\\${proxyAddress.port}`,
   ]) {
-    assert.equal((await send({ host: malformedHost })).status, 403, `reject malformed Host: ${malformedHost}`);
+    assert.equal((await send({ host: malformedHost })).status, 400, `reject malformed Host: ${malformedHost}`);
   }
   for (const host of [
     `127.0.0.1:${proxyAddress.port}?unexpected`,
@@ -233,7 +233,7 @@ test('HTTP proxy blocks cross-site browser Origins and spoofed Host headers befo
     `0x7f000001:${proxyAddress.port}`,
   ]) {
     const malformedHost = await send({ host });
-    assert.equal(malformedHost.status, 403, `malformed Host must be rejected: ${host}`);
+    assert.equal(malformedHost.status, 400, `malformed Host must be rejected: ${host}`);
   }
   assert.equal(upstreamCalls, 0, 'rejected browser requests must never reach upstream');
 
