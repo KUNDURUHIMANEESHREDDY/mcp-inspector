@@ -408,13 +408,15 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
       return;
     }
     if (!localOnly) {
+      const peerAddress = incoming.socket.remoteAddress;
       const authorizationHeaderCount = incoming.rawHeaders.reduce((count, name, index) =>
         index % 2 === 0 && name.toLowerCase() === 'authorization' ? count + 1 : count, 0);
       if (authorizationHeaderCount > 1) {
-        rejectUnauthorized(outgoing, incoming);
+        const retryAfterSeconds = authFailureLimiter.recordFailure(peerAddress);
+        if (retryAfterSeconds > 0) rejectRateLimited(outgoing, retryAfterSeconds, incoming);
+        else rejectUnauthorized(outgoing, incoming);
         return;
       }
-      const peerAddress = incoming.socket.remoteAddress;
       if (!hasValidBearerToken(incoming.headers.authorization, configuredProxyToken)) {
         const retryAfterSeconds = authFailureLimiter.recordFailure(peerAddress);
         if (retryAfterSeconds > 0) rejectRateLimited(outgoing, retryAfterSeconds, incoming);
