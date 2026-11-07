@@ -45,7 +45,8 @@ Compatibility:
   compat is read-only. It initializes and lists tools; it never invokes server tools.
   Use --transport both to check stdio and Streamable HTTP in the same report.
   --timeout-ms accepts 100-120000; fuzz/workflow --max-duration-ms accepts 1000-900000.
-  --oauth uses the SDK OAuth 2.1/PKCE flow and a state-checked loopback callback; tokens are memory-only.\n  --oauth-refresh-scope <scopes> optionally sends configured scopes on token refresh.
+  --oauth uses the SDK OAuth 2.1/PKCE flow and a state-checked loopback callback; tokens are memory-only.
+  --oauth-refresh-scope <scopes> optionally sends configured scopes on token refresh.
 
 Safety:
   Fuzzing is dry-run by default. Real tool calls require BOTH --execute and
@@ -65,7 +66,8 @@ Environment:
   MCP_INSPECTOR_MAX_REQUEST_BYTES     Maximum forwarded HTTP body (default 16 MiB; valid 1 KiB-64 MiB)
   MCP_INSPECTOR_PROXY_BEARER_TOKEN    Shared remote proxy credential (minimum 32 characters)
   MCP_INSPECTOR_ALLOWED_ORIGINS       Exact comma-separated browser Origin allowlist
-  MCP_INSPECTOR_LOG_LEVEL             debug|info|warn|error (default info)\n  MCP_INSPECTOR_OAUTH_REFRESH_SCOPE   Optional space-delimited OAuth scopes sent only on refresh
+  MCP_INSPECTOR_LOG_LEVEL             debug|info|warn|error (default info)
+  MCP_INSPECTOR_OAUTH_REFRESH_SCOPE   Optional space-delimited OAuth scopes sent only on refresh
 `;
 
 function ensureSupportedNode() {
@@ -330,7 +332,8 @@ async function commandCompatibility(args) {
       transports, protocols, command: options.commandArgs[0], args: options.commandArgs.slice(1), url: options.url,
       timeoutMs: parseBoundedInteger(options.timeoutMs, 15_000, 100, 120_000, '--timeout-ms'),
       oauth: options.oauth === true,
-      oauthTimeoutMs: parseBoundedInteger(options.oauthTimeoutMs, 300_000, 30_000, 900_000, '--oauth-timeout-ms'),\n      oauthRefreshScope: options.oauthRefreshScope ?? process.env.MCP_INSPECTOR_OAUTH_REFRESH_SCOPE,
+      oauthTimeoutMs: parseBoundedInteger(options.oauthTimeoutMs, 300_000, 30_000, 900_000, '--oauth-timeout-ms'),
+      oauthRefreshScope: options.oauthRefreshScope ?? process.env.MCP_INSPECTOR_OAUTH_REFRESH_SCOPE,
       signal: controller.signal,
     });
   } finally {
