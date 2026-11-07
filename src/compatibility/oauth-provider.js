@@ -3,8 +3,9 @@ import { createServer } from 'node:http';
 import { once } from 'node:events';
 
 export class InMemoryOAuthProvider {
-  constructor(redirectUrl) {
+  constructor(redirectUrl, { refreshScope } = {}) {
     this.redirectUrl = redirectUrl;
+    this.refreshScope = refreshScope;
     this.clientMetadata = {
       client_name: 'MCP Inspector',
       redirect_uris: [redirectUrl],
@@ -38,6 +39,10 @@ export class InMemoryOAuthProvider {
   saveTokens(tokens, context) {
     const issuer = context?.issuer ?? this.storedTokens?.issuer;
     this.storedTokens = issuer ? { ...tokens, issuer } : { ...tokens };
+  }
+
+  scopeForRefresh() {
+    return this.refreshScope;
   }
 
   state() {
@@ -84,7 +89,7 @@ export class InMemoryOAuthProvider {
  * the host and OAuth state match exactly; callback error descriptions are never
  * rendered or logged. Tokens are kept in memory only for this CLI run.
  */
-export async function createOAuthContext() {
+export async function createOAuthContext({ refreshScope } = {}) {
   let provider;
   let waiting = null;
   let completedParams;
@@ -135,7 +140,7 @@ export async function createOAuthContext() {
   await once(server, 'listening');
   port = server.address().port;
   const redirectUrl = 'http://127.0.0.1:' + port + '/callback';
-  provider = new InMemoryOAuthProvider(redirectUrl);
+  provider = new InMemoryOAuthProvider(redirectUrl, { refreshScope });
 
   function waitForCallback({ timeoutMs = 300_000, signal } = {}) {
     if (completedParams) {

@@ -123,7 +123,7 @@ node ./src/cli.js compat --transport http --url http://127.0.0.1:3000/mcp
 node ./src/cli.js compat --transport both --url http://127.0.0.1:3000/mcp -- node ./fixtures/sdk-mcp-server.js
 ```
 
-The JSON report contains one pass/fail result per transport/protocol combination, negotiated protocol era, elapsed time, tool count, and normalized contract hash. Exit code 1 means at least one probe failed. URL credentials are rejected. For protected HTTP endpoints, configure `MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN` or `MCP_INSPECTOR_UPSTREAM_HEADERS` for static credentials. `--oauth` invokes the MCP SDK's OAuth authorization-code/PKCE flow, prints the authorization URL to stderr, checks the loopback callback's Host and state, and holds tokens in memory only for the current process. OAuth requires HTTPS off loopback. Results reflect only the target endpoint actually tested; this is not blanket certification of third-party servers.
+The JSON report contains one pass/fail result per transport/protocol combination, negotiated protocol era, elapsed time, tool count, and normalized contract hash. Exit code 1 means at least one probe failed. URL credentials are rejected. For protected HTTP endpoints, configure `MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN` or `MCP_INSPECTOR_UPSTREAM_HEADERS` for static credentials. `--oauth` invokes the MCP SDK's OAuth authorization-code/PKCE flow, prints the authorization URL to stderr, checks the loopback callback's Host and state, and holds tokens in memory only for the current process. OAuth requires HTTPS off loopback. Results reflect only the target endpoint actually tested; this is not blanket certification of third-party servers. For authorization servers that require scopes on token refresh (for example, Microsoft Entra), set `--oauth-refresh-scope "openid offline_access"` or `MCP_INSPECTOR_OAUTH_REFRESH_SCOPE`. This is opt-in and is sent only on refresh-token requests; the default OAuth flow is unchanged. The SDK retains the requested scope when a refresh response omits `scope`.
 
 ### 5. Replay a stateful workflow
 
@@ -196,6 +196,7 @@ Set these environment variables only when needed:
 | `MCP_INSPECTOR_MAX_PENDING_REQUESTS` | `10000` | Maximum pending RPC correlations per transport store |
 | `MCP_INSPECTOR_SESSION_IDLE_MS` | `1800000` | Legacy HTTP session idle TTL, 1 minute to 24 hours |
 | `MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN` | unset | Optional bearer token for the configured HTTP upstream |
+| `MCP_INSPECTOR_OAUTH_REFRESH_SCOPE` | unset | Optional space-delimited scopes sent only on OAuth token refresh; requires `--oauth` |
 | `MCP_INSPECTOR_UPSTREAM_TIMEOUT_MS` | `120000` | Upstream inactivity timeout, from 1 second to 1 hour |
 | `MCP_INSPECTOR_ALLOWED_ORIGINS` | unset | Exact comma-separated browser Origin allowlist; required for remote browser access |
 
