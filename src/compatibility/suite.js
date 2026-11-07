@@ -166,7 +166,7 @@ async function runOne({ transport, protocol, command, args, url, timeoutMs, sign
  */
 export async function runCompatibilitySuite({
   transports = ['stdio'], protocols = ['legacy', 'auto', 'modern'], command, args = [], url,
-  timeoutMs = 15_000, signal, oauth = false, oauthTimeoutMs = 300_000,
+  timeoutMs = 15_000, signal, oauth = false, oauthTimeoutMs = 300_000, oauthRefreshScope,
 } = {}) {
   if (!Array.isArray(transports) || transports.length < 1 || transports.some((item) => !TRANSPORTS.has(item))) throw new TypeError('transports must contain stdio and/or http');
   if (!Array.isArray(protocols) || protocols.length < 1 || protocols.some((item) => !PROTOCOL_MODES.has(item))) throw new TypeError('protocols must contain legacy, auto, and/or modern');
@@ -175,6 +175,12 @@ export async function runCompatibilitySuite({
   if (transports.includes('stdio') && (typeof command !== 'string' || command.length === 0)) throw new TypeError('stdio transport requires a server command');
   if (transports.includes('http')) validateEndpoint(url);
   if (oauth && !transports.includes('http')) throw new TypeError('OAuth can only be used with the HTTP transport');
+  if (oauthRefreshScope !== undefined) {
+    if (!oauth) throw new TypeError('OAuth refresh scope requires OAuth to be enabled');
+    if (typeof oauthRefreshScope !== 'string' || !oauthRefreshScope.trim() || oauthRefreshScope.length > 2048 || /[\\r\\n\\u0000]/.test(oauthRefreshScope)) {
+      throw new TypeError('oauthRefreshScope must be a non-empty scope string up to 2048 characters without control line breaks');
+    }
+  }
 
   const endpoint = transports.includes('http') ? validateEndpoint(url) : null;
   const httpHeaders = endpoint ? getHttpHeaders(endpoint, oauth) : {};
@@ -188,7 +194,7 @@ export async function runCompatibilitySuite({
   let oauthContext;
   const results = [];
   try {
-    if (oauth) oauthContext = await createOAuthContext();
+    if (oauth) oauthContext = await createOAuthContext({ refreshScope: oauthRefreshScope?.trim() });
     for (const transport of transports) {
       for (const protocol of protocols) {
         if (signal?.aborted) {
