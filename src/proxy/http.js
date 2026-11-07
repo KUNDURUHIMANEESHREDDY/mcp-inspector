@@ -289,7 +289,7 @@ function rejectRateLimited(outgoing, retryAfterSeconds, incoming) {
 
 function hasValidBearerToken(header, expected) {
   if (typeof header !== 'string' || typeof expected !== 'string') return false;
-  const match = /^Bearer ([A-Za-z0-9._~+\\/-]+=*)$/i.exec(header);
+  const match = /^Bearer ([A-Za-z0-9._~+-]+=*)$/i.exec(header);
   if (!match) return false;
   const actual = Buffer.from(match[1], 'utf8');
   const wanted = Buffer.from(expected, 'utf8');
@@ -347,7 +347,7 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
     if (!configuredProxyToken || configuredProxyToken.length < 32) {
       throw new Error('Non-loopback binds require MCP_INSPECTOR_PROXY_BEARER_TOKEN with at least 32 characters');
     }
-    if (!/^[A-Za-z0-9._~+\\/-]+=*$/.test(configuredProxyToken)) {
+    if (!/^[A-Za-z0-9._~+-]+=*$/.test(configuredProxyToken)) {
       throw new Error('MCP_INSPECTOR_PROXY_BEARER_TOKEN contains unsupported header characters');
     }
     if (allowedOrigins.size === 0) {
@@ -408,6 +408,12 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
       return;
     }
     if (!localOnly) {
+      const authorizationHeaderCount = incoming.rawHeaders.reduce((count, name, index) =>
+        index % 2 === 0 && name.toLowerCase() === 'authorization' ? count + 1 : count, 0);
+      if (authorizationHeaderCount > 1) {
+        rejectUnauthorized(outgoing, incoming);
+        return;
+      }
       const peerAddress = incoming.socket.remoteAddress;
       if (!hasValidBearerToken(incoming.headers.authorization, configuredProxyToken)) {
         const retryAfterSeconds = authFailureLimiter.recordFailure(peerAddress);
@@ -480,6 +486,9 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
     if (sessionState) sessionState.flushPending = (reason) => egressInspector.flushPending(reason);
 
     const headers = filterHopHeaders(incoming.headers);
+    // The proxy's client credential is never an upstream credential. Only an
+    // explicitly configured upstream header/token may cross this boundary.
+    if (!localOnly) delete headers.authorization;
     Object.assign(headers, configuredHeaders);
     headers.host = upstreamUrl.host;
     headers.connection = 'keep-alive';
