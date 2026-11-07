@@ -31,7 +31,7 @@ test('log sanitization bounds deeply nested arrays without throwing', () => {
   };
 
   try {
-    assert.doesNotThrow(() => log('info', 'deep-array', { payload: nested }));
+    assert.doesNotThrow(() => log('error', 'deep-array', { payload: nested }));
   } finally {
     process.stderr.write = originalWrite;
   }
