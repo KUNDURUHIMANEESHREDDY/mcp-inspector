@@ -8,6 +8,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ci = readFileSync(resolve(ROOT, '.github/workflows/ci.yml'), 'utf8').replace(/\r\n/g, '\n');
 const browser = readFileSync(resolve(ROOT, '.github/workflows/browser-e2e.yml'), 'utf8').replace(/\r\n/g, '\n');
 const codeql = readFileSync(resolve(ROOT, '.github/workflows/codeql.yml'), 'utf8').replace(/\r\n/g, '\n');
+const release = readFileSync(resolve(ROOT, '.github/workflows/release.yml'), 'utf8').replace(/\r\n/g, '\n');
 
 test('Browser E2E and CodeQL workflows are reusable without losing standalone triggers', () => {
   assert.match(browser, /^  workflow_call:\s*$/m);
@@ -34,4 +35,13 @@ test('the stable required aggregate fails closed on Browser E2E and CodeQL resul
   assert.match(required, /test "\$BROWSER_E2E_RESULT" = success/);
   assert.match(required, /test "\$CODEQL_RESULT" = success/);
   assert.match(required, /set -euo pipefail/);
+});
+
+
+test('release packaging is blocked until reusable Browser E2E and CodeQL workflows pass', () => {
+  assert.match(release, /^  browser-e2e:\n    name: Required browser E2E\n    uses: \.\/\.github\/workflows\/browser-e2e\.yml/m);
+  assert.match(release, /^  codeql:\n    name: Required CodeQL\n    uses: \.\/\.github\/workflows\/codeql\.yml/m);
+  assert.match(release, /^  package:\n    name: Verify and package release assets\n    needs: \[browser-e2e, codeql\]/m);
+  assert.match(release, /^  publish:\n    name: Publish GitHub release\n    if: startsWith\(github\.ref, 'refs\/tags\/'\)\n    needs: \[package\]/m);
+  assert.match(release, /security-events: write/);
 });
