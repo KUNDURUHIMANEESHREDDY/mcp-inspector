@@ -42,10 +42,10 @@ test('OAuth refresh scope is opt-in and follows RFC 6749 scope-token grammar bef
     ' openid',
     'openid ',
     'openid  offline_access',
-    'openid\\tadmin',
-    'openid\\r\\nadmin',
+    'openid\tadmin',
+    'openid\r\nadmin',
     'openid"admin',
-    'openid\\\\admin',
+    'openid\\admin',
     'openid café',
     'x'.repeat(2049),
   ]) {
