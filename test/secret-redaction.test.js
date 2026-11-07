@@ -104,3 +104,98 @@ test('redacts semicolon-delimited credentials while preserving safe query values
   assert.match(safe, /;access_token=\[REDACTED\]/);
   assert.match(safe, /;client%2Dsecret=\[REDACTED\]/);
 });
+
+test('redacts bracketed credential query keys while preserving safe arrays', () => {
+  const input = [
+    'https://example.test/callback?access_token[]=array-access-secret',
+    '&client%5Fsecret%5B0%5D=array-client-secret',
+    '&refresh_token[primary][value]=nested-refresh-secret',
+    '&safe[0]=keep-this-value',
+  ].join('');
+  const safe = redactSecrets(input);
+
+  assert.doesNotMatch(safe, /array-access-secret|array-client-secret|nested-refresh-secret/);
+  assert.match(safe, /access_token\[\]=\[REDACTED\]/);
+  assert.match(safe, /client%5Fsecret%5B0%5D=\[REDACTED\]/);
+  assert.match(safe, /refresh_token\[primary\]\[value\]=\[REDACTED\]/);
+  assert.match(safe, /safe\[0\]=keep-this-value/);
+});
+
+
+test('redacts multiply percent-encoded credential query names without changing safe names', () => {
+  const input = [
+    'https://example.test/callback?access%255Ftoken=double-encoded-access-secret',
+    '&client%252Dsecret=double-encoded-client-secret',
+    '&refresh%25255Ftoken=triple-encoded-refresh-secret',
+    '&access%2525255Ftoken=quadruple-encoded-access-secret',
+    '&access%255Ftoken%ZZ=malformed-double-encoded-secret',
+    '&safe%255Fparameter=keep-this-value',
+    '&stateful=keep-stateful-value',
+  ].join('');
+  const safe = redactSecrets(input);
+
+  assert.doesNotMatch(
+    safe,
+    /double-encoded-access-secret|double-encoded-client-secret|triple-encoded-refresh-secret|quadruple-encoded-access-secret|malformed-double-encoded-secret/,
+  );
+  assert.match(safe, /access%255Ftoken=\[REDACTED\]/);
+  assert.match(safe, /client%252Dsecret=\[REDACTED\]/);
+  assert.match(safe, /refresh%25255Ftoken=\[REDACTED\]/);
+  assert.match(safe, /access%2525255Ftoken=\[REDACTED\]/);
+  assert.match(safe, /access%255Ftoken%ZZ=\[REDACTED\]/);
+  assert.match(safe, /safe%255Fparameter=keep-this-value/);
+  assert.match(safe, /stateful=keep-stateful-value/);
+});
+
+test('redacts OAuth credentials in URL fragments while preserving ordinary anchors', () => {
+  const input = [
+    'https://idp.example/callback#access_token=fragment-access-secret&refresh_token=fragment-refresh-secret;client_secret=fragment-client-secret',
+    'https://idp.example/callback#access%255Ftoken=double-encoded-fragment-secret',
+    'https://idp.example/callback#access%255Ftoken%ZZ=malformed-fragment-secret',
+    'https://app.example/#/callback?state=fragment-state-secret&safe=keep-this-value',
+    'https://example.test/page#section=shows',
+  ].join(' ');
+  const safe = redactSecrets(input);
+
+  assert.doesNotMatch(
+    safe,
+    /fragment-access-secret|fragment-refresh-secret|fragment-client-secret|fragment-state-secret|double-encoded-fragment-secret|malformed-fragment-secret/,
+  );
+  assert.ok(safe.includes('#access_token=[REDACTED]'));
+  assert.ok(safe.includes('#access%255Ftoken=[REDACTED]'));
+  assert.ok(safe.includes('#access%255Ftoken%ZZ=[REDACTED]'));
+  assert.ok(safe.includes('&refresh_token=[REDACTED]'));
+  assert.ok(safe.includes(';client_secret=[REDACTED]'));
+  assert.ok(safe.includes('#/callback?state=[REDACTED]&safe=keep-this-value'));
+  assert.ok(safe.includes('#section=shows'));
+});
+
+test('redacts deeply encoded OAuth fragment keys after the decode bound', () => {
+  // A telemetry wrapper may encode a URL repeatedly. The bounded decoder must
+  // still fail closed without needing an attacker-controlled unbounded loop.
+  let encodedName = 'access%5Ftoken';
+  for (let depth = 0; depth < 12; depth += 1) {
+    encodedName = encodedName.replace(/%/g, '%25');
+  }
+  const secret = 'deeply-encoded-fragment-secret';
+  const safe = redactSecrets(`https://idp.example/callback#${encodedName}=${secret}`);
+  assert.doesNotMatch(safe, new RegExp(secret));
+  assert.ok(safe.includes(`${encodedName}=[REDACTED]`));
+});
+
+
+test('URL userinfo redaction covers WHATWG tab/newline normalization inside the scheme', () => {
+  const inputs = [
+    'ht\ntps://alice:scheme-newline-secret@issuer.example/path',
+    'h\nttps://alice:scheme-middle-newline-secret@issuer.example/path',
+    'https:\n//alice:separator-newline-secret@issuer.example/path',
+    'https:/\n/alice:slash-separator-newline-secret@issuer.example/path',
+    'https:\t//alice:separator-tab-secret@issuer.example/path',
+  ];
+  for (const input of inputs) {
+    assert.notEqual(new URL(input).password, '');
+    const output = redactSecrets('connect ' + input);
+    assert.doesNotMatch(output, /alice|scheme-newline-secret|scheme-middle-newline-secret|separator-newline-secret|slash-separator-newline-secret|separator-tab-secret/);
+    assert.match(output, /\[REDACTED\]@issuer\.example\/path/);
+  }
+});
