@@ -55,6 +55,40 @@ test('OAuth callback binds Host and state and never serves attacker-supplied cal
 });
 
 
+
+test('OAuth provider validates refresh scopes before opening a callback listener', async () => {
+  const invalidScopes = [
+    '',
+    ' ',
+    ' openid',
+    'openid ',
+    'openid  offline_access',
+    'openid\tadmin',
+    'openid\r\nadmin',
+    'openid"admin',
+    'openid\\admin',
+    'openid café',
+    'x'.repeat(2049),
+  ];
+  for (const refreshScope of invalidScopes) {
+    assert.throws(
+      () => new InMemoryOAuthProvider('http://127.0.0.1:8090/callback', { refreshScope }),
+      /valid RFC 6749 scope string/,
+      JSON.stringify(refreshScope),
+    );
+    await assert.rejects(
+      createOAuthContext({ refreshScope }),
+      /valid RFC 6749 scope string/,
+      JSON.stringify(refreshScope),
+    );
+  }
+  const context = await createOAuthContext({ refreshScope: 'openid profile offline_access' });
+  try {
+    assert.equal(context.provider.scopeForRefresh(), 'openid profile offline_access');
+  } finally {
+    await context.close();
+  }
+});
 test('OAuth refresh scope is absent by default and opt-in when configured', async (t) => {
   const defaultContext = await createOAuthContext();
   t.after(() => defaultContext.close());

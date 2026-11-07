@@ -3,7 +3,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { performance } from 'node:perf_hooks';
 import { createContract, contractHash } from '../contracts/contract.js';
 import { summarizeCompatibilityResults } from './engine.js';
-import { createOAuthContext } from './oauth-provider.js';
+import { createOAuthContext, validateOAuthRefreshScope } from './oauth-provider.js';
 import { isLoopbackHostname as isLoopback } from '../network/address.js';
 
 const PROTOCOL_MODES = new Set(['legacy', 'auto', 'modern']);
@@ -175,12 +175,10 @@ export async function runCompatibilitySuite({
   if (transports.includes('stdio') && (typeof command !== 'string' || command.length === 0)) throw new TypeError('stdio transport requires a server command');
   if (transports.includes('http')) validateEndpoint(url);
   if (oauth && !transports.includes('http')) throw new TypeError('OAuth can only be used with the HTTP transport');
-  if (oauthRefreshScope !== undefined) {
-    if (!oauth) throw new TypeError('OAuth refresh scope requires OAuth to be enabled');
-    if (typeof oauthRefreshScope !== 'string' || !oauthRefreshScope.trim() || oauthRefreshScope.length > 2048 || /[\r\n\u0000]/.test(oauthRefreshScope)) {
-      throw new TypeError('oauthRefreshScope must be a non-empty scope string up to 2048 characters without control line breaks');
-    }
+  if (oauthRefreshScope !== undefined && !oauth) {
+    throw new TypeError('OAuth refresh scope requires OAuth to be enabled');
   }
+  const validatedOAuthRefreshScope = validateOAuthRefreshScope(oauthRefreshScope);
 
   const endpoint = transports.includes('http') ? validateEndpoint(url) : null;
   const httpHeaders = endpoint ? getHttpHeaders(endpoint, oauth) : {};
@@ -194,7 +192,7 @@ export async function runCompatibilitySuite({
   let oauthContext;
   const results = [];
   try {
-    if (oauth) oauthContext = await createOAuthContext({ refreshScope: oauthRefreshScope?.trim() });
+    if (oauth) oauthContext = await createOAuthContext({ refreshScope: validatedOAuthRefreshScope });
     for (const transport of transports) {
       for (const protocol of protocols) {
         if (signal?.aborted) {
