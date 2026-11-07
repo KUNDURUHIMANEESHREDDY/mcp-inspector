@@ -4,6 +4,7 @@ import { performance } from 'node:perf_hooks';
 import { createContract, contractHash } from '../contracts/contract.js';
 import { summarizeCompatibilityResults } from './engine.js';
 import { createOAuthContext } from './oauth-provider.js';
+import { isLoopbackHostname as isLoopback } from '../network/address.js';
 
 const PROTOCOL_MODES = new Set(['legacy', 'auto', 'modern']);
 const TRANSPORTS = new Set(['stdio', 'http']);
@@ -22,10 +23,6 @@ function validateEndpoint(value) {
   return endpoint;
 }
 
-function isLoopback(hostname) {
-  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
-  return host === 'localhost' || host === '127.0.0.1' || host === '::1';
-}
 
 function getHttpHeaders(endpoint, oauth) {
   const token = process.env.MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN || '';
