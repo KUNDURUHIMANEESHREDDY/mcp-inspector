@@ -53,3 +53,17 @@ test('OAuth callback binds Host and state and never serves attacker-supplied cal
   assert.equal(params.get('code'), 'authorized-code');
   assert.equal(params.get('iss'), 'https://issuer.example');
 });
+
+
+test('OAuth refresh scope is absent by default and opt-in when configured', async (t) => {
+  const defaultContext = await createOAuthContext();
+  t.after(() => defaultContext.close());
+  assert.equal(defaultContext.provider.scopeForRefresh(), undefined);
+
+  const scopedContext = await createOAuthContext({ refreshScope: 'openid profile offline_access' });
+  t.after(() => scopedContext.close());
+  assert.equal(
+    scopedContext.provider.scopeForRefresh({ refresh_token: 'test-refresh-token' }),
+    'openid profile offline_access',
+  );
+});
