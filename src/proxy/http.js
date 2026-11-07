@@ -265,14 +265,16 @@ function rejectBadRequest(outgoing, reason, incoming) {
   outgoing.end(body);
 }
 
-function rejectRequest(outgoing, reason) {
+function rejectRequest(outgoing, reason, incoming) {
   log('warn', 'http.request_rejected', { reason });
   outgoing.writeHead(403, {
+    connection: 'close',
     'content-type': 'text/plain; charset=utf-8',
     'cache-control': 'no-store',
     'content-length': '9',
     'x-content-type-options': 'nosniff',
   });
+  closeAfterResponse(outgoing, incoming);
   outgoing.end('Forbidden');
 }
 
@@ -433,14 +435,18 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
     const requestHostname = hostHeaderHostname(incoming.headers.host);
     // HTTP/1.1 requires exactly one valid Host authority. Reject duplicate or
     // missing Host fields rather than relying on parser/intermediary precedence.
-    if (hostHeaderCount !== 1 || !requestHostname || (localOnly && !isLoopback(requestHostname))) {
+    if (hostHeaderCount !== 1 || !requestHostname) {
       rejectBadRequest(outgoing, 'invalid_host', incoming);
+      return;
+    }
+    if (localOnly && !isLoopback(requestHostname)) {
+      rejectRequest(outgoing, 'invalid_host', incoming);
       return;
     }
     const origin = incoming.headers.origin;
     if (origin !== undefined && !originIsAllowed(origin, { localOnly, allowedOrigins })) {
       incoming.resume();
-      rejectRequest(outgoing, 'origin_not_allowed');
+      rejectRequest(outgoing, 'origin_not_allowed', incoming);
       return;
     }
     const corsHeaders = origin ? {
@@ -464,8 +470,7 @@ export function startHttpProxy({ upstream, listen = '127.0.0.1:9900', allowRemot
         'mcp-session-id', 'last-event-id', 'if-none-match', 'if-match',
       ]);
       if (!allowedMethods.has(requestedMethod) || requestedHeaders.some((header) => !allowedHeaders.has(header))) {
-        incoming.resume();
-        rejectRequest(outgoing, 'preflight_not_allowed');
+        rejectRequest(outgoing, 'preflight_not_allowed', incoming);
         return;
       }
       incoming.resume();
