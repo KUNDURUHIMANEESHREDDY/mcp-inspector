@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { request as httpRequest } from 'node:http';
+import { auth } from '@modelcontextprotocol/client';
 import { InMemoryOAuthProvider, createOAuthContext } from '../src/compatibility/oauth-provider.js';
 
 test('OAuth client credentials and tokens are isolated by authorization-server issuer', () => {
@@ -100,4 +101,95 @@ test('OAuth refresh scope is absent by default and opt-in when configured', asyn
     scopedContext.provider.scopeForRefresh({ refresh_token: 'test-refresh-token' }),
     'openid profile offline_access',
   );
+});
+
+
+const MOCK_ISSUER = 'https://auth.example.test';
+const MOCK_RESOURCE = 'http://127.0.0.1:3000/mcp';
+const MOCK_GRANTED_SCOPE = 'openid profile offline_access';
+
+async function runMockRefresh(refreshScope) {
+  const context = await createOAuthContext(
+    refreshScope === undefined ? {} : { refreshScope },
+  );
+  const issuer = MOCK_ISSUER;
+  context.provider.saveDiscoveryState({
+    authorizationServerUrl: issuer,
+    authorizationServerMetadata: {
+      issuer,
+      token_endpoint: issuer + '/token',
+      token_endpoint_auth_methods_supported: ['none'],
+      grant_types_supported: ['refresh_token'],
+      scopes_supported: MOCK_GRANTED_SCOPE.split(' '),
+    },
+    resourceMetadata: {
+      resource: MOCK_RESOURCE,
+      authorization_servers: [issuer],
+      scopes_supported: MOCK_GRANTED_SCOPE.split(' '),
+    },
+  });
+  context.provider.saveClientInformation({
+    client_id: 'mcp-inspector-refresh-test',
+    token_endpoint_auth_method: 'none',
+  }, { issuer });
+  context.provider.saveTokens({
+    access_token: 'expired-access-token',
+    token_type: 'Bearer',
+    refresh_token: 'test-refresh-token',
+    scope: MOCK_GRANTED_SCOPE,
+    issuer,
+  }, { issuer });
+
+  const requests = [];
+  const fetchFn = async (input, init = {}) => {
+    const url = input instanceof URL ? input : new URL(String(input));
+    requests.push({
+      url,
+      method: init.method,
+      body: new URLSearchParams(String(init.body ?? '')),
+    });
+    return new Response(JSON.stringify({
+      access_token: 'fresh-access-token',
+      token_type: 'Bearer',
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+
+  try {
+    const result = await auth(context.provider, {
+      serverUrl: MOCK_RESOURCE,
+      fetchFn,
+    });
+    return { result, requests, tokens: context.provider.tokens() };
+  } finally {
+    await context.close();
+  }
+}
+
+test('SDK OAuth refresh sends the configured scope and preserves it when the response omits scope', async () => {
+  const { result, requests, tokens } = await runMockRefresh(MOCK_GRANTED_SCOPE);
+  assert.equal(result, 'AUTHORIZED');
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url.href, MOCK_ISSUER + '/token');
+  assert.equal(requests[0].method, 'POST');
+  assert.equal(requests[0].body.get('grant_type'), 'refresh_token');
+  assert.equal(requests[0].body.get('refresh_token'), 'test-refresh-token');
+  assert.equal(requests[0].body.get('scope'), MOCK_GRANTED_SCOPE);
+  assert.equal(tokens.access_token, 'fresh-access-token');
+  assert.equal(tokens.refresh_token, 'test-refresh-token');
+  assert.equal(tokens.scope, MOCK_GRANTED_SCOPE);
+});
+
+test('SDK OAuth refresh omits scope by default even when stored tokens record a granted scope', async () => {
+  const { result, requests, tokens } = await runMockRefresh(undefined);
+  assert.equal(result, 'AUTHORIZED');
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url.href, MOCK_ISSUER + '/token');
+  assert.equal(requests[0].body.get('grant_type'), 'refresh_token');
+  assert.equal(requests[0].body.get('refresh_token'), 'test-refresh-token');
+  assert.equal(requests[0].body.has('scope'), false);
+  assert.equal(tokens.access_token, 'fresh-access-token');
+  assert.equal(tokens.refresh_token, 'test-refresh-token');
 });
