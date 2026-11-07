@@ -370,6 +370,10 @@ test('upstream DNS address policy blocks private/reserved ranges unless explicit
   for (const address of [
     '127.0.0.1', '10.2.3.4', '169.254.4.2', '172.16.0.1', '192.168.1.4',
     '224.0.0.1', '::1', 'fc00::1', 'fe80::1', 'fe80::1%eth0', '::ffff:7f00:1',
+    // RFC 6052 Well-Known NAT64 inherits the embedded IPv4 restrictions.
+    '64:ff9b::7f00:1', '64:ff9b::a00:1', '64:ff9b::a9fe:1', '64:ff9b::c0a8:101',
+    // RFC 8215 local-use translation space is not globally reachable.
+    '64:ff9b:1::c0a8:101',
     // IPv4 literals cannot carry IPv6 zone identifiers; malformed resolver answers fail closed.
     '127.0.0.1%lo0', '8.8.8.8%lo0', '8.8.8.8%25lo0',
     // DNS lookup answers are bare IP literals; bracketed or half-bracketed forms fail closed.
@@ -383,7 +387,7 @@ test('upstream DNS address policy blocks private/reserved ranges unless explicit
   ]) {
     assert.equal(isRestrictedUpstreamAddress(address), true, 'restricted: ' + address);
   }
-  for (const address of ['8.8.8.8', '1.1.1.1', '2606:4700:4700::1111', '2606:4700:4700:0000:0000:0000:0000:1111']) {
+  for (const address of ['8.8.8.8', '1.1.1.1', '2606:4700:4700::1111', '2606:4700:4700:0000:0000:0000:0000:1111', '64:ff9b::808:808']) {
     assert.equal(isRestrictedUpstreamAddress(address), false, 'public: ' + address);
   }
 });
