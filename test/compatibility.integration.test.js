@@ -40,6 +40,34 @@ test('compatibility probes legacy, auto, and modern Streamable HTTP', { skip: !r
   assert.ok(report.results.every((result) => result.contractHash && result.toolCount >= 1));
 });
 
+test('compatibility treats the full IPv4 loopback range as local for bearer credentials', { skip: !runCompatibilitySuite || !createSdkHttpFixtureServer, timeout: 60_000 }, async (t) => {
+  const previousToken = process.env.MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN;
+  const previousHeaders = process.env.MCP_INSPECTOR_UPSTREAM_HEADERS;
+  process.env.MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN = 'test-only-loopback-token';
+  delete process.env.MCP_INSPECTOR_UPSTREAM_HEADERS;
+
+  const server = createSdkHttpFixtureServer();
+  try {
+    server.listen(0, '127.0.0.2');
+    await once(server, 'listening');
+    const address = server.address();
+    const report = await runCompatibilitySuite({
+      transports: ['http'],
+      protocols: ['legacy'],
+      url: 'http://127.0.0.2:' + address.port + '/mcp',
+      timeoutMs: 15_000,
+    });
+    assert.equal(report.summary.total, 1);
+    assert.equal(report.summary.passed, 1, JSON.stringify(report.results));
+  } finally {
+    if (previousToken === undefined) delete process.env.MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN;
+    else process.env.MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN = previousToken;
+    if (previousHeaders === undefined) delete process.env.MCP_INSPECTOR_UPSTREAM_HEADERS;
+    else process.env.MCP_INSPECTOR_UPSTREAM_HEADERS = previousHeaders;
+    if (server.listening) await new Promise((resolveClose) => server.close(resolveClose));
+  }
+});
+
 test('compatibility validation rejects URL credentials and invalid timeouts', { skip: !runCompatibilitySuite }, async () => {
   await assert.rejects(runCompatibilitySuite({ transports: ['http'], url: 'http://user:password@127.0.0.1:3000/mcp' }), /Credentials in endpoint URLs are not allowed/);
   await assert.rejects(runCompatibilitySuite({ transports: ['stdio'], command: process.execPath, timeoutMs: 0 }), /timeoutMs must be an integer/);
