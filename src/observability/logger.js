@@ -15,11 +15,16 @@ function sanitizeValue(key, value, depth = 0) {
   if (SENSITIVE_KEY.test(key)) return '[REDACTED]';
   if (typeof value === 'string') return safeString(value);
   if (value === null || ['number', 'boolean'].includes(typeof value)) return value;
+  // Apply the depth limit before the array branch as well as the object branch.
+  // Deeply nested arrays can be supplied by remote JSON-RPC data; without this
+  // guard they recurse without a bound and can throw RangeError in the logger.
+  if (value && typeof value === 'object' && depth >= 3) {
+    return Array.isArray(value) ? '[array]' : '[object]';
+  }
   if (Array.isArray(value)) {
     return value.slice(0, 100).map((item) => sanitizeValue(key, item, depth + 1));
   }
   if (value && typeof value === 'object') {
-    if (depth >= 3) return '[object]';
     const safe = {};
     for (const [childKey, childValue] of Object.entries(value).slice(0, 50)) {
       safe[childKey] = sanitizeValue(childKey, childValue, depth + 1);

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { requestKey, safeString } from '../src/observability/logger.js';
+import { log, requestKey, safeString } from '../src/observability/logger.js';
 
 test('string JSON-RPC ids are correlated without logging the raw identifier', () => {
   const id = 'sensitive-user-supplied-id';
@@ -17,4 +17,26 @@ test('log string sanitization redacts bearer credentials and URL secrets', () =>
   assert.ok(!safe.includes('secret'));
   assert.ok(!safe.includes('github_pat_'));
   assert.match(safe, /REDACTED/);
+});
+
+test('log sanitization bounds deeply nested arrays without throwing', () => {
+  let nested = 'safe diagnostic';
+  for (let depth = 0; depth < 10_000; depth += 1) nested = [nested];
+
+  const output = [];
+  const originalWrite = process.stderr.write;
+  process.stderr.write = (chunk) => {
+    output.push(String(chunk));
+    return true;
+  };
+
+  try {
+    assert.doesNotThrow(() => log('error', 'deep-array', { payload: nested }));
+  } finally {
+    process.stderr.write = originalWrite;
+  }
+
+  assert.equal(output.length, 1);
+  const record = JSON.parse(output[0]);
+  assert.deepEqual(record.payload, [[['[array]']]]);
 });
