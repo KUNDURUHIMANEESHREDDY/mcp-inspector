@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validateJsonRpcEnvelope, summarizeCompatibilityResults } from '../src/compatibility/engine.js';
+import { runCompatibilitySuite } from '../src/compatibility/suite.js';
 
 test('JSON-RPC validator accepts requests, notifications, responses, null IDs, and extension members', () => {
   assert.deepEqual(validateJsonRpcEnvelope({ jsonrpc: '2.0', id: 1, method: 'ping' }), { valid: true, kind: 'request', errors: [] });
@@ -22,4 +23,25 @@ test('compatibility summaries fail closed for failed or cancelled probes', () =>
   assert.deepEqual(summarizeCompatibilityResults([{ status: 'passed' }, { status: 'passed' }]), { passed: 2, failed: 0, cancelled: 0, total: 2, success: true });
   assert.equal(summarizeCompatibilityResults([{ status: 'passed' }, { status: 'failed' }]).success, false);
   assert.equal(summarizeCompatibilityResults([{ status: 'cancelled' }]).success, false);
+});
+
+
+test('OAuth refresh scope is opt-in and rejects unsafe values before connecting', async () => {
+  const target = {
+    transports: ['http'],
+    protocols: ['legacy'],
+    url: 'http://127.0.0.1:3000/mcp',
+  };
+  await assert.rejects(
+    runCompatibilitySuite({ ...target, oauthRefreshScope: 'openid offline_access' }),
+    /requires OAuth to be enabled/,
+  );
+  await assert.rejects(
+    runCompatibilitySuite({ ...target, oauth: true, oauthRefreshScope: 'openid\\nadmin' }),
+    /without control line breaks/,
+  );
+  await assert.rejects(
+    runCompatibilitySuite({ ...target, oauth: true, oauthRefreshScope: 'x'.repeat(2049) }),
+    /up to 2048 characters/,
+  );
 });
