@@ -392,7 +392,7 @@ test('upstream DNS address policy blocks private/reserved ranges unless explicit
   }
 });
   
-test('localhost upstream DNS answers must remain inside loopback', { skip: !createSafeUpstreamLookup }, async () => {
+test('loopback upstream DNS answers must remain inside loopback', { skip: !createSafeUpstreamLookup }, async () => {
   const loopbackAnswers = [
     { address: '127.0.0.1', family: 4 },
     { address: '::1', family: 6 },
@@ -403,21 +403,31 @@ test('localhost upstream DNS answers must remain inside loopback', { skip: !crea
     createSafeUpstreamLookup(allowlist, stubLookup(answers))(hostname, { all: true }, (...args) => resolve(args));
   });
 
-  // Hostname normalization must apply before the special-use exception.
-  for (const hostname of ['localhost', 'LOCALHOST.']) {
+  // Hostname normalization must apply before the loopback exception. Even a
+  // loopback IP literal must not be trusted if a resolver returns a non-loopback
+  // address for it (for example, through a broken resolver or test double).
+  const loopbackHostnames = [
+    'localhost', 'LOCALHOST.', '127.0.0.1', '127.0.0.2',
+    '::1', '[::1]', '0:0:0:0:0:0:0:1', '::ffff:127.0.0.1',
+  ];
+  for (const hostname of loopbackHostnames) {
     const local = await resolveWith(hostname, loopbackAnswers);
-    assert.equal(local[0], null);
-    assert.deepEqual(local[1], loopbackAnswers);
+    assert.equal(local[0], null, hostname);
+    assert.deepEqual(local[1], loopbackAnswers, hostname);
   }
 
-  for (const answers of [
+  const unsafeAnswers = [
     [{ address: '8.8.8.8', family: 4 }],
     [{ address: '::ffff:8.8.8.8', family: 6 }],
     [{ address: '127.0.0.1', family: 4 }, { address: '8.8.8.8', family: 4 }],
     [{ address: '::1', family: 6 }, { address: '::ffff:8.8.8.8', family: 6 }],
-  ]) {
-    const result = await resolveWith('localhost', answers);
-    assert.equal(result[0]?.code, 'ERR_MCP_INSPECTOR_UPSTREAM_ADDRESS_BLOCKED');
+    [{ address: '64:ff9b::808:808', family: 6 }],
+  ];
+  for (const hostname of loopbackHostnames) {
+    for (const answers of unsafeAnswers) {
+      const result = await resolveWith(hostname, answers);
+      assert.equal(result[0]?.code, 'ERR_MCP_INSPECTOR_UPSTREAM_ADDRESS_BLOCKED', hostname);
+    }
   }
 
   // Explicit operator allowlisting remains the supported way to trust a

@@ -165,8 +165,8 @@ export function createSafeUpstreamLookup(allowedHosts, lookup = dnsLookup) {
       // address returned by a misconfigured hosts file or resolver. Require
       // every answer to remain loopback before bypassing the private-address
       // filter; otherwise a public answer could turn localhost into an SSRF hop.
-      if (normalized === 'localhost' && addresses.some((item) => !isLoopbackAddress(item.address))) {
-        const blocked = new Error('Localhost resolved outside the loopback address range');
+      if (isLoopback(normalized) && addresses.some((item) => !isLoopbackAddress(item.address))) {
+        const blocked = new Error('Loopback upstream resolved outside the loopback address range');
         blocked.code = 'ERR_MCP_INSPECTOR_UPSTREAM_ADDRESS_BLOCKED';
         return done(blocked);
       }
