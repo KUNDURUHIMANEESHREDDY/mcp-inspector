@@ -8,7 +8,7 @@ MCP Inspector is a local-first CLI with a built-in web dashboard. It sits betwee
 
 ## Windows quick start
 
-1. Install Node.js 22 or newer, Git, and npm.
+1. Install Node.js 22.15.0 or newer, Git, and npm.
 2. Extract this repository ZIP.
 3. Double-click `RUN_LOCAL_CHECKS.bat` first. It installs dependencies and runs static checks, tests, the dependency audit, and benchmarks. The window stays open on success or failure.
 4. Double-click `RUN_DASHBOARD.bat` to connect to a Streamable HTTP MCP server (default `http://127.0.0.1:3000`). Enter the actual upstream URL, then open `http://127.0.0.1:9911`; configure your MCP client to use the proxy at `http://127.0.0.1:9900` with the upstream's MCP path (commonly `/mcp`).
@@ -28,7 +28,7 @@ If an older extracted copy reports an OpenTelemetry `ERESOLVE` error, run `FIX_O
 
 ## Requirements
 
-- Node.js **22 or newer** and npm 10 or newer.
+- Node.js **22.15.0 or newer** and npm 10 or newer.
 - Git is only needed for contributing.
 - An OTLP/HTTP trace collector is optional.
 

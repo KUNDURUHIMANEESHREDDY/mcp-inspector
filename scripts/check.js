@@ -3,6 +3,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { resolve, join, relative } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { findUnpinnedActionReferences } from './workflow-action-pins.js';
+import { validateMinimumRuntimeWorkflow } from './ci-runtime-contract.js';
 
 const root = resolve(import.meta.dirname, '..');
 const scanRoots = ['src', 'test', 'bench', 'scripts', 'fixtures'];
@@ -34,9 +35,36 @@ for (const file of ['package.json', 'workflow.example.json']) {
   }
 }
 const packageJson = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
-if (!String(packageJson.engines?.node ?? '').includes('22')) {
+const packageLock = JSON.parse(await readFile(join(root, 'package-lock.json'), 'utf8'));
+if (packageLock.packages?.['']?.engines?.node !== packageJson.engines?.node) {
   failed = true;
-  process.stderr.write('package.json must declare a tested Node.js engine floor.\n');
+  process.stderr.write('package-lock.json must match package.json Node.js engine metadata.\n');
+}
+const ciWorkflow = await readFile(join(root, '.github', 'workflows', 'ci.yml'), 'utf8');
+function extractTopLevelBlock(source, key) {
+  const lines = source.split(/\r?\n/);
+  const start = lines.findIndex((line) => line === `  ${key}:`);
+  if (start < 0) return '';
+  let end = start + 1;
+  while (end < lines.length && !/^  [A-Za-z0-9_-]+:\s*$/.test(lines[end])) end += 1;
+  return lines.slice(start, end).join('\n');
+}
+const requiredJob = extractTopLevelBlock(ciWorkflow, 'required');
+for (const error of validateMinimumRuntimeWorkflow(ciWorkflow)) {
+  failed = true;
+  process.stderr.write(error + '\n');
+}
+const requiredGateIncludesMinimumRuntime = Boolean(requiredJob)
+  && /needs:\s*\[[^\]]*minimum-runtime/.test(requiredJob)
+  && requiredJob.includes('MINIMUM_RUNTIME_RESULT: ${{ needs.minimum-runtime.result }}')
+  && requiredJob.includes('test "$MINIMUM_RUNTIME_RESULT" = success');
+if (!requiredGateIncludesMinimumRuntime) {
+  failed = true;
+  process.stderr.write('The required aggregate must fail unless minimum-runtime succeeds.\n');
+}
+if (packageJson.engines?.node !== '>=22.15.0') {
+  failed = true;
+  process.stderr.write('package.json must declare the supported Node.js floor >=22.15.0.\n');
 }
 if ((await stat(join(root, 'README.md'))).size < 1000) {
   failed = true;
