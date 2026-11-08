@@ -38,11 +38,11 @@ test('stdio proxy forwards JSON-RPC bytes unchanged and keeps diagnostics off st
 
 test('stdio proxy does not leak its HTTP upstream bearer token to the launched MCP server', { skip: !supported }, async (t) => {
   const cli = resolve(root, 'src/cli.js');
-  const script = 'process.stdout.write(JSON.stringify({present:Object.hasOwn(process.env,"MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN")})+"\\n")';
+  const script = 'process.stdout.write(JSON.stringify({bearer:Object.hasOwn(process.env,"MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN"),headers:Object.hasOwn(process.env,"MCP_INSPECTOR_UPSTREAM_HEADERS")})+"\\n")';
   const proxy = spawn(process.execPath, [cli, 'proxy', '--', process.execPath, '-e', script], {
     stdio: ['pipe', 'pipe', 'pipe'],
     cwd: root,
-    env: { ...process.env, MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN: 'must-not-leak', MCP_INSPECTOR_LOG_LEVEL: 'error' },
+    env: { ...process.env, MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN: 'must-not-leak', MCP_INSPECTOR_UPSTREAM_HEADERS: JSON.stringify({ authorization: 'Bearer must-not-leak' }), MCP_INSPECTOR_LOG_LEVEL: 'error' },
   });
   t.after(() => { if (proxy.exitCode === null) proxy.kill('SIGKILL'); });
   const output = await new Promise((resolvePromise, reject) => {
@@ -59,5 +59,5 @@ test('stdio proxy does not leak its HTTP upstream bearer token to the launched M
     });
     proxy.stderr.on('data', () => {});
   });
-  assert.deepEqual(JSON.parse(output), { present: false });
+  assert.deepEqual(JSON.parse(output), { bearer: false, headers: false });
 });
