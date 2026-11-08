@@ -4,7 +4,7 @@
  * shapes fail closed instead of being accepted by loose text matching.
  */
 function jobBlock(source, name) {
-  const lines = source.replace(/\r\n/g, '\n').split('\n');
+  const lines = source.replace(/\r\n?/g, '\n').split('\n');
   const start = lines.findIndex((line) => line === '  ' + name + ':');
   if (start < 0) return null;
   let end = start + 1;
@@ -55,6 +55,21 @@ function stepAllowsFailure(step) {
   return value !== null && value !== 'false';
 }
 
+/**
+ * Fail closed if the job itself enables continue-on-error. Only an explicit
+ * YAML boolean false is accepted; expressions and quoted values are rejected.
+ */
+function jobAllowsFailure(jobLines) {
+  const settings = jobLines.filter((line) => /^    continue-on-error\s*:/.test(line));
+  if (settings.length === 0) return false;
+  if (settings.length !== 1) return true;
+
+  const value = settings[0].slice(settings[0].indexOf(':') + 1)
+    .replace(/\s+#.*$/, '')
+    .trim();
+  return value !== 'false';
+}
+
 function matchingSteps(steps, predicate) {
   return steps.filter(predicate);
 }
@@ -73,6 +88,9 @@ export function validateMinimumRuntimeWorkflow(source) {
   if (/^    strategy\s*:/m.test(jobText)) errors.push('minimum-runtime job must not use a matrix or strategy.');
   if (!/^    runs-on:\s*ubuntu-latest\s*$/m.test(jobText)) {
     errors.push('minimum-runtime job must run on ubuntu-latest.');
+  }
+  if (jobAllowsFailure(job)) {
+    errors.push('minimum-runtime job must not enable job-level continue-on-error.');
   }
 
   const parsed = stepBlocks(job);
