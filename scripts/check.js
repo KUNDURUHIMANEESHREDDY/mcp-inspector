@@ -40,9 +40,34 @@ if (packageLock.packages?.['']?.engines?.node !== packageJson.engines?.node) {
   process.stderr.write('package-lock.json must match package.json Node.js engine metadata.\n');
 }
 const ciWorkflow = await readFile(join(root, '.github', 'workflows', 'ci.yml'), 'utf8');
-if (!ciWorkflow.includes("node: ['22.15.0', '24', '26']") || !ciWorkflow.includes("node-version: '22.15.0'")) {
+function extractTopLevelBlock(source, key) {
+  const lines = source.split(/\r?\n/);
+  const start = lines.findIndex((line) => line === `  ${key}:`);
+  if (start < 0) return '';
+  let end = start + 1;
+  while (end < lines.length && !/^  [A-Za-z0-9_-]+:\s*$/.test(lines[end])) end += 1;
+  return lines.slice(start, end).join('\n');
+}
+const minimumRuntimeJob = extractTopLevelBlock(ciWorkflow, 'minimum-runtime');
+const requiredJob = extractTopLevelBlock(ciWorkflow, 'required');
+const minimumRuntimeIsUnconditional = Boolean(minimumRuntimeJob)
+  && !/^    if:/m.test(minimumRuntimeJob)
+  && !/^    strategy:/m.test(minimumRuntimeJob);
+const minimumRuntimeRunsRequiredChecks = [
+  /^    runs-on:\s*ubuntu-latest\s*$/m,
+  /node-version:\s*'22\.15\.0'/,
+  /run:\s*npm ci --no-audit --no-fund/,
+  /run:\s*npm test(?:\s|$)/,
+  /run:\s*npm run test:compat/,
+  /run:\s*npm audit --audit-level=high/,
+].every((pattern) => pattern.test(minimumRuntimeJob));
+const requiredGateIncludesMinimumRuntime = Boolean(requiredJob)
+  && /needs:\s*\[[^\]]*minimum-runtime/.test(requiredJob)
+  && requiredJob.includes('MINIMUM_RUNTIME_RESULT: ${{ needs.minimum-runtime.result }}')
+  && requiredJob.includes('test "$MINIMUM_RUNTIME_RESULT" = success');
+if (!minimumRuntimeIsUnconditional || !minimumRuntimeRunsRequiredChecks || !requiredGateIncludesMinimumRuntime) {
   failed = true;
-  process.stderr.write('CI must exercise the declared minimum Node.js version on Linux and Windows.\n');
+  process.stderr.write('CI must run and require an unconditional Linux Node.js 22.15.0 minimum-runtime job.\n');
 }
 if (packageJson.engines?.node !== '>=22.15.0') {
   failed = true;
