@@ -3,6 +3,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { resolve, join, relative } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { findUnpinnedActionReferences } from './workflow-action-pins.js';
+import { validateMinimumRuntimeWorkflow } from './ci-runtime-contract.js';
 
 const root = resolve(import.meta.dirname, '..');
 const scanRoots = ['src', 'test', 'bench', 'scripts', 'fixtures'];
@@ -48,26 +49,18 @@ function extractTopLevelBlock(source, key) {
   while (end < lines.length && !/^  [A-Za-z0-9_-]+:\s*$/.test(lines[end])) end += 1;
   return lines.slice(start, end).join('\n');
 }
-const minimumRuntimeJob = extractTopLevelBlock(ciWorkflow, 'minimum-runtime');
 const requiredJob = extractTopLevelBlock(ciWorkflow, 'required');
-const minimumRuntimeIsUnconditional = Boolean(minimumRuntimeJob)
-  && !/^    if:/m.test(minimumRuntimeJob)
-  && !/^    strategy:/m.test(minimumRuntimeJob);
-const minimumRuntimeRunsRequiredChecks = [
-  /^    runs-on:\s*ubuntu-latest\s*$/m,
-  /node-version:\s*'22\.15\.0'/,
-  /run:\s*npm ci --no-audit --no-fund/,
-  /run:\s*npm test(?:\s|$)/,
-  /run:\s*npm run test:compat/,
-  /run:\s*npm audit --audit-level=high/,
-].every((pattern) => pattern.test(minimumRuntimeJob));
+for (const error of validateMinimumRuntimeWorkflow(ciWorkflow)) {
+  failed = true;
+  process.stderr.write(error + '\n');
+}
 const requiredGateIncludesMinimumRuntime = Boolean(requiredJob)
   && /needs:\s*\[[^\]]*minimum-runtime/.test(requiredJob)
   && requiredJob.includes('MINIMUM_RUNTIME_RESULT: ${{ needs.minimum-runtime.result }}')
   && requiredJob.includes('test "$MINIMUM_RUNTIME_RESULT" = success');
-if (!minimumRuntimeIsUnconditional || !minimumRuntimeRunsRequiredChecks || !requiredGateIncludesMinimumRuntime) {
+if (!requiredGateIncludesMinimumRuntime) {
   failed = true;
-  process.stderr.write('CI must run and require an unconditional Linux Node.js 22.15.0 minimum-runtime job.\n');
+  process.stderr.write('The required aggregate must fail unless minimum-runtime succeeds.\n');
 }
 if (packageJson.engines?.node !== '>=22.15.0') {
   failed = true;
