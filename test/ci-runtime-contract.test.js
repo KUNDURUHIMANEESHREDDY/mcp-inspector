@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { validateMinimumRuntimeWorkflow } from '../scripts/ci-runtime-contract.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const workflow = readFileSync(resolve(ROOT, '.github/workflows/ci.yml'), 'utf8');
+const workflow = readFileSync(resolve(ROOT, '.github/workflows/ci.yml'), 'utf8').replace(/\\r\\n/g, '\\n');
 
 test('the declared minimum runtime job runs its required checks unconditionally', () => {
   assert.deepEqual(validateMinimumRuntimeWorkflow(workflow), []);
