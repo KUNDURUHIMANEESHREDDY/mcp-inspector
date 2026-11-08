@@ -68,9 +68,10 @@ export function validateMinimumRuntimeWorkflow(source) {
   const job = jobBlock(source, 'minimum-runtime');
   if (!job) return ['CI must define a minimum-runtime job.'];
 
-  if (/^    if\s*:/m.test(job)) errors.push('minimum-runtime job must not have a job-level if condition.');
-  if (/^    strategy\s*:/m.test(job)) errors.push('minimum-runtime job must not use a matrix or strategy.');
-  if (!/^    runs-on:\s*ubuntu-latest\s*$/m.test(job)) {
+  const jobText = job.join('\n');
+  if (/^    if\s*:/m.test(jobText)) errors.push('minimum-runtime job must not have a job-level if condition.');
+  if (/^    strategy\s*:/m.test(jobText)) errors.push('minimum-runtime job must not use a matrix or strategy.');
+  if (!/^    runs-on:\s*ubuntu-latest\s*$/m.test(jobText)) {
     errors.push('minimum-runtime job must run on ubuntu-latest.');
   }
 
