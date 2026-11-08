@@ -2,7 +2,7 @@
 
 ## Development prerequisites
 
-- Node.js 24 LTS or Node.js 26
+- Node.js 22.15.0 or newer (CI verifies 22.15.0, 24, and 26)
 - npm 10+
 - Git
 
