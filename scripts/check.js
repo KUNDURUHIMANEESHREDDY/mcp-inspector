@@ -37,12 +37,12 @@ const packageJson = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'
 const packageLock = JSON.parse(await readFile(join(root, 'package-lock.json'), 'utf8'));
 if (packageLock.packages?.['']?.engines?.node !== packageJson.engines?.node) {
   failed = true;
-  process.stderr.write('package-lock.json must match package.json Node.js engine metadata.\\n');
+  process.stderr.write('package-lock.json must match package.json Node.js engine metadata.\n');
 }
 const ciWorkflow = await readFile(join(root, '.github', 'workflows', 'ci.yml'), 'utf8');
 if (!ciWorkflow.includes("node: ['22.15.0', '24', '26']") || !ciWorkflow.includes("node-version: '22.15.0'")) {
   failed = true;
-  process.stderr.write('CI must exercise the declared minimum Node.js version on Linux and Windows.\\n');
+  process.stderr.write('CI must exercise the declared minimum Node.js version on Linux and Windows.\n');
 }
 if (packageJson.engines?.node !== '>=22.15.0') {
   failed = true;
