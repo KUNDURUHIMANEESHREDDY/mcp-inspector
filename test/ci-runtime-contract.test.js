@@ -42,3 +42,22 @@ test('the minimum runtime job cannot be made conditional or matrix-only', () => 
   );
   assert.match(validateMinimumRuntimeWorkflow(matrix).join('\n'), /matrix or strategy/);
 });
+
+test('job-level continue-on-error is rejected unless explicitly false', () => {
+  const withJobSetting = (value) => workflow.replace(
+    '  minimum-runtime:\n    name: Minimum supported runtime / Node 22.15.0',
+    '  minimum-runtime:\n    continue-on-error: ' + value + '\n    name: Minimum supported runtime / Node 22.15.0',
+  );
+  assert.match(validateMinimumRuntimeWorkflow(withJobSetting('true')).join('\n'), /job-level continue-on-error/);
+  assert.match(validateMinimumRuntimeWorkflow(withJobSetting('${{ false }}')).join('\n'), /job-level continue-on-error/);
+  assert.deepEqual(validateMinimumRuntimeWorkflow(withJobSetting('false')), []);
+  assert.deepEqual(validateMinimumRuntimeWorkflow(withJobSetting('false # explicit fail-closed value')), []);
+});
+
+test('CR-only and mixed line endings cannot hide a job-level failure override', () => {
+  const weakened = workflow.replace(
+    '  minimum-runtime:\n    name: Minimum supported runtime / Node 22.15.0',
+    '  minimum-runtime:\n    continue-on-error: true\n    name: Minimum supported runtime / Node 22.15.0',
+  ).replace(/\r?\n/g, '\r');
+  assert.match(validateMinimumRuntimeWorkflow(weakened).join('\n'), /job-level continue-on-error/);
+});
