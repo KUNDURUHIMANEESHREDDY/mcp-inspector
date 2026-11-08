@@ -240,3 +240,8 @@ Before a stable 1.0 release, the project should add multi-version real-server te
 ## License
 
 MIT. See [LICENSE](./LICENSE).
+
+
+## CI contract gates
+
+`mcp-inspector contract-diff --baseline old.json --current new.json` exits non-zero for breaking tool-contract changes. Add `--fail-on-security-review` when a pipeline must also stop for any changed tool safety annotation that the report marks for manual review. This option does not execute tools or change the comparator's compatibility classification; it turns the existing `securityReview` signal into an explicit CI gate.

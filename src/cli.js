@@ -21,7 +21,7 @@ Usage:
   mcp-inspector snapshot --output <contract.json> [--protocol legacy|auto|modern] -- <server-command> [args...]
   mcp-inspector fuzz [--case-mode valid|invalid|mixed] [--max-cases 30] [--protocol legacy|auto|modern] [--execute --allow-side-effects] -- <server-command> [args...]
   mcp-inspector workflow --file <workflow.json> [--execute --allow-side-effects] -- <server-command> [args...]
-  mcp-inspector contract-diff --baseline <old.json> --current <new.json>
+  mcp-inspector contract-diff --baseline <old.json> --current <new.json> [--fail-on-security-review]
   mcp-inspector compat --transport stdio -- <server-command> [args...]
   mcp-inspector compat --transport http --url <http-url> [--oauth]
   mcp-inspector compat --transport both --url <http-url> -- <server-command> [args...]
@@ -53,6 +53,7 @@ Safety:
   --allow-side-effects. Tool calls can mutate files or invoke external systems.
   Remote HTTP binds also require MCP_INSPECTOR_PROXY_BEARER_TOKEN (32+ chars) and MCP_INSPECTOR_ALLOWED_ORIGINS.
   Logs contain metadata only; request arguments and tool results are not logged.
+  Contract CI can add --fail-on-security-review to fail when tool safety annotations change and require review.
 
 Protocol modes:
   legacy                       Use the initialize handshake (default)
@@ -346,12 +347,13 @@ async function commandCompatibility(args) {
 }
 
 async function commandContractDiff(args) {
-  const options = parseOptions(args, { value: ['baseline', 'current'] });
+  const options = parseOptions(args, { boolean: ['fail-on-security-review'], value: ['baseline', 'current'] });
   if (!options.baseline || !options.current) throw new Error('--baseline and --current are required');
   const [baseline, current] = await Promise.all([readContract(resolve(options.baseline)), readContract(resolve(options.current))]);
   const report = compareContracts(baseline, current);
-  await printJson({ baseline: resolve(options.baseline), current: resolve(options.current), ...report });
-  process.exitCode = report.breaking ? 1 : 0;
+  const securityReviewRequired = report.changes.some((change) => change.securityReview === true);
+  await printJson({ baseline: resolve(options.baseline), current: resolve(options.current), security_review_required: securityReviewRequired, ...report });
+  process.exitCode = report.breaking || (options.failOnSecurityReview && securityReviewRequired) ? 1 : 0;
 }
 
 async function commandInspect(args) {
