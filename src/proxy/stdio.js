@@ -6,9 +6,11 @@ import { log, logError } from '../observability/logger.js';
 export function startStdioProxy(command, args = [], options = {}) {
   if (!command) throw new Error('A target command is required after `--`');
   const childEnv = { ...process.env };
-  // This secret authenticates only the HTTP upstream; it must never be inherited
-  // by an unrelated stdio MCP server launched by the proxy.
+  // HTTP upstream credentials belong to this proxy process only. Never expose
+  // either the bearer token or custom Authorization headers to an unrelated
+  // stdio MCP server launched by the proxy.
   delete childEnv.MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN;
+  delete childEnv.MCP_INSPECTOR_UPSTREAM_HEADERS;
   const child = spawn(command, args, {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: childEnv,
