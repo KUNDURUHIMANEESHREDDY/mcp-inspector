@@ -45,8 +45,8 @@ test('stdio child environment preserves case-sensitive names on POSIX', () => {
 
 test('stdio proxy forwards JSON-RPC bytes unchanged and keeps diagnostics off stdout', { skip: !supported }, async (t) => {
   const cli = resolve(root, 'src/cli.js');
-  const server = resolve(root, 'fixtures/echo-mcp-server.js');
-  const proxy = spawn(process.execPath, [cli, 'proxy', '--', process.execPath, server], {
+  const echo = 'process.stdin.pipe(process.stdout)';
+  const proxy = spawn(process.execPath, [cli, 'proxy', '--', process.execPath, '-e', echo], {
     stdio: ['pipe', 'pipe', 'pipe'],
     cwd: root,
     env: { ...process.env, MCP_INSPECTOR_LOG_LEVEL: 'error' },
