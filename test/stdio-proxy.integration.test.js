@@ -89,8 +89,8 @@ test('stdio proxy forwards JSON-RPC bytes unchanged and keeps diagnostics off st
     });
   });
 
-  assert.deepEqual(await readLine(), Buffer.from('ready\\n'));
-  const request = Buffer.from('{"jsonrpc":"2.0","id":11,"method":"ping"}\\n');
+  assert.deepEqual(await readLine(), Buffer.from('ready\n'));
+  const request = Buffer.from('{"jsonrpc":"2.0","id":11,"method":"ping"}\n');
   proxy.stdin.write(request);
   assert.deepEqual(await readLine(), request);
   proxy.stdin.end();
