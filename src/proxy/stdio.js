@@ -3,12 +3,29 @@ import { MessageInspector } from '../protocol/inspector.js';
 import { ContractRecorder } from '../contracts/contract.js';
 import { log, logError } from '../observability/logger.js';
 
+const UPSTREAM_CREDENTIAL_ENV_NAMES = new Set([
+  'MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN',
+  'MCP_INSPECTOR_UPSTREAM_HEADERS',
+]);
+
+export function createStdioChildEnv(sourceEnv = process.env, platform = process.platform) {
+  const childEnv = { ...sourceEnv };
+
+  // Windows environment names are case-insensitive, while a spread object can
+  // preserve the spelling used by the parent. Remove every spelling that would
+  // resolve to either HTTP-upstream credential on Windows. POSIX keeps its
+  // case-sensitive environment semantics.
+  for (const key of Object.keys(childEnv)) {
+    const candidate = platform === 'win32' ? key.toUpperCase() : key;
+    if (UPSTREAM_CREDENTIAL_ENV_NAMES.has(candidate)) delete childEnv[key];
+  }
+
+  return childEnv;
+}
+
 export function startStdioProxy(command, args = [], options = {}) {
   if (!command) throw new Error('A target command is required after `--`');
-  const childEnv = { ...process.env };
-  // This secret authenticates only the HTTP upstream; it must never be inherited
-  // by an unrelated stdio MCP server launched by the proxy.
-  delete childEnv.MCP_INSPECTOR_UPSTREAM_BEARER_TOKEN;
+  const childEnv = createStdioChildEnv();
   const child = spawn(command, args, {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: childEnv,
