@@ -1,0 +1,208 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://proofline.dev/schemas/evidence-v1.schema.json",
+  "title": "Proofline Evidence Envelope v1",
+  "description": "Strict, provenance-bearing evidence records. Operational MCP observations are deliberately distinct from criterion verification evidence.",
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "recordType": {
+      "enum": [
+        "verification",
+        "observation"
+      ]
+    },
+    "evidenceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9:._/-]{0,199}$"
+    },
+    "issueKey": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 64,
+      "pattern": "^[A-Z][A-Z0-9_]*-[1-9][0-9]*$"
+    },
+    "source": {
+      "enum": [
+        "github-actions",
+        "mcp-inspector"
+      ]
+    },
+    "sourceRunId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "observedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "verifier": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "additionalProperties": false
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 500
+    },
+    "artifact": {
+      "type": "object",
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "uri",
+        "sha256"
+      ],
+      "additionalProperties": false
+    },
+    "criterionKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9._-]{0,63}$"
+    },
+    "outcome": {
+      "enum": [
+        "PASS",
+        "FAIL"
+      ]
+    },
+    "eventName": {
+      "enum": [
+        "mcp.rpc.request",
+        "mcp.rpc.response",
+        "mcp.protocol.error",
+        "mcp.contract.diff",
+        "mcp.timeout"
+      ]
+    },
+    "observationStatus": {
+      "enum": [
+        "observed",
+        "success",
+        "error",
+        "timeout"
+      ]
+    },
+    "toolName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "protocol": {
+      "enum": [
+        "stdio",
+        "streamable-http",
+        "unknown"
+      ]
+    },
+    "durationMs": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 86400000
+    },
+    "contractHash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "recordType",
+    "evidenceId",
+    "issueKey",
+    "source",
+    "sourceRunId",
+    "observedAt",
+    "verifier"
+  ],
+  "additionalProperties": false,
+  "oneOf": [
+    {
+      "properties": {
+        "recordType": {
+          "const": "verification"
+        },
+        "source": {
+          "const": "github-actions"
+        },
+        "criterionKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9._-]{0,63}$"
+        },
+        "outcome": {
+          "enum": [
+            "PASS",
+            "FAIL"
+          ]
+        }
+      },
+      "required": [
+        "criterionKey",
+        "outcome"
+      ]
+    },
+    {
+      "properties": {
+        "recordType": {
+          "const": "observation"
+        },
+        "source": {
+          "const": "mcp-inspector"
+        },
+        "eventName": {
+          "enum": [
+            "mcp.rpc.request",
+            "mcp.rpc.response",
+            "mcp.protocol.error",
+            "mcp.contract.diff",
+            "mcp.timeout"
+          ]
+        },
+        "observationStatus": {
+          "enum": [
+            "observed",
+            "success",
+            "error",
+            "timeout"
+          ]
+        }
+      },
+      "required": [
+        "eventName",
+        "observationStatus"
+      ]
+    }
+  ]
+}
