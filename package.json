@@ -16,6 +16,7 @@
     "start": "node ./src/cli.js",
     "test": "node --test",
     "test:coverage": "node --test --experimental-test-coverage",
+    "test:acceptance": "node --test test/real-upstream.acceptance.test.js",
     "check": "node ./scripts/check.js",
     "audit": "npm audit --omit=dev --audit-level=high",
     "bench": "node ./bench/framer.js",
