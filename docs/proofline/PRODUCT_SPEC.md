@@ -47,6 +47,7 @@ Use the existing No Presumed Pass semantics as the reference:
 ```json
 {
   "schemaVersion": 1,
+  "recordType": "verification",
   "evidenceId": "ci:run-842:unit-tests",
   "issueKey": "PAY-142",
   "criterionKey": "unit-tests",
