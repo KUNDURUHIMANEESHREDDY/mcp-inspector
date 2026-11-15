@@ -343,7 +343,7 @@ test(
   async (t) => {
     const started = performance.now();
     const authServer = attachIssuerSnapshot(createMockAuthorizationServer());
-    const issuer = await authServer.listen();
+    await authServer.listen();
     t.after(() => authServer.close());
 
     const resource = createProtectedMcpResource({ authServer });
@@ -439,11 +439,14 @@ test(
         headers: { host },
       });
 
-    const wrongState = await send(`/callback?state=forged&code=x`);
+    const wrongState = await send('/callback?state=forged&code=x');
     assert.equal(wrongState.status, 400);
     assert.doesNotMatch(await wrongState.text(), /forged|x/);
 
-    const wrongHost = await send(`/callback?state=${encodeURIComponent(state)}&code=y`, 'evil.example`);
+    const wrongHost = await send(
+      `/callback?state=${encodeURIComponent(state)}&code=y`,
+      'evil.example',
+    );
     assert.equal(wrongHost.status, 400);
 
     const waiting = context.waitForCallback({ timeoutMs: 2_000 });
