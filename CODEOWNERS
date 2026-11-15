@@ -1,0 +1,20 @@
+# Security-sensitive paths. Repository ruleset "protect-main-required-ci"
+# requires PRs to main and the stable "required" CI status check.
+# CODEOWNERS review can be enabled later by setting require_code_owner_review
+# on the ruleset once additional reviewers exist.
+
+# HTTP proxy, auth limiter, and remote binding controls
+/src/proxy/ @KUNDURUHIMANEESHREDDY
+
+# Loopback / address classification used by remote policy
+/src/network/ @KUNDURUHIMANEESHREDDY
+
+# OAuth callback binding and token handling
+/src/compatibility/oauth-provider.js @KUNDURUHIMANEESHREDDY
+
+# Secret redaction used in telemetry and logs
+/src/observability/redact-secrets.js @KUNDURUHIMANEESHREDDY
+
+# CI release gate definition
+/.github/workflows/ci.yml @KUNDURUHIMANEESHREDDY
+/.github/workflows/release.yml @KUNDURUHIMANEESHREDDY
