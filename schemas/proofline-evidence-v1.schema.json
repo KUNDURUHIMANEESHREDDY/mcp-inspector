@@ -171,7 +171,21 @@
       "required": [
         "criterionKey",
         "outcome"
-      ]
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "eventName"
+            ]
+          },
+          {
+            "required": [
+              "observationStatus"
+            ]
+          }
+        ]
+      }
     },
     {
       "properties": {
@@ -202,7 +216,21 @@
       "required": [
         "eventName",
         "observationStatus"
-      ]
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "criterionKey"
+            ]
+          },
+          {
+            "required": [
+              "outcome"
+            ]
+          }
+        ]
+      }
     }
   ]
 }
